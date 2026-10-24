@@ -67,8 +67,12 @@
   function show(view) {
     S.view = view;
     for (const v of ['setup', 'live', 'card']) $('view-' + v).hidden = v !== view;
-    document.querySelectorAll('.steps span').forEach((el) => {
-      if (el.dataset.step === view) el.setAttribute('aria-current', 'step'); else el.removeAttribute('aria-current');
+    // Progress markers, not links: earlier steps read as done, the current one is lit.
+    const here = ['setup', 'live', 'card'].indexOf(view);
+    document.querySelectorAll('.steps li').forEach((el, i) => {
+      el.dataset.state = i < here ? 'done' : i === here ? 'current' : 'todo';
+      if (i === here) el.setAttribute('aria-current', 'step'); else el.removeAttribute('aria-current');
+      el.querySelector('.sr').hidden = i >= here;
     });
     window.scrollTo(0, 0);
   }
@@ -495,7 +499,8 @@
     card.classList.remove('print'); void card.offsetWidth; card.classList.add('print');
 
     const words = ['Zero', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten'];
-    $('verdict').textContent = c.pct + '% focused.';
+    const tooShort = c.early && c.done < 60; // ended before a full minute: a % would read as a bug
+    $('verdict').textContent = tooShort ? 'Ended early.' : c.pct + '% focused.';
     const worst = c.events.slice().sort((a, b) => b.len - a.len)[0];
     const lapses = c.events.length;
     $('verdictSub').textContent = Math.round(c.done / 60) + ' minutes, ' + (lapses ? (words[lapses] || lapses).toLowerCase() + ' lapse' + (lapses > 1 ? 's' : '') : 'no lapses') +
@@ -506,7 +511,7 @@
       StudyPet.drawPet($('petCard'), petOpts(c.mood));
       if (c.leveled) levelUpMoment(c);
       $('petVerdict').textContent = c.leveled ? petName() + ' reached Level ' + S.progress.level + '!' + (S.progress.level === 5 ? ' Goggles unlocked.' : S.progress.level === 10 ? ' Bow tie unlocked.' : S.progress.level === 15 ? ' Top hat unlocked.' : '') :
-      c.pct >= 80 ? petName() + ' is most proud.' : c.pct >= PENALTY_BELOW ? petName() + ' is content.' : petName() + ' is disappointed, but you keep your level.';
+      tooShort ? petName() + ' barely got started.' : c.pct >= 80 ? petName() + ' is most proud.' : c.pct >= PENALTY_BELOW ? petName() + ' is content.' : petName() + ' is disappointed, but you keep your level.';
     $('cardLevel').textContent = 'Lv ' + S.progress.level;
     $('cardXp').textContent = S.progress.xp + ' / ' + XP_PER_LEVEL + ' XP';
     $('cardXpFill').style.width = ((S.progress.xp / XP_PER_LEVEL) * 100).toFixed(1) + '%';

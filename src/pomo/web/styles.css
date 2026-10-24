@@ -45,8 +45,22 @@ button { font: inherit; }
   border-bottom: 4px double var(--brass);
 }
 .brand { font-family: var(--display); font-size: 30px; color: var(--brass); }
-.steps { display: flex; gap: 20px; font-family: var(--display); font-size: 18px; color: var(--muted); }
-.steps span[aria-current="step"] { color: var(--brass-pale); border-bottom: 2px solid var(--brass-pale); }
+.steps {
+  display: flex; align-items: center; margin: 0; padding: 0; list-style: none;
+  font-family: var(--display); font-size: 18px; color: var(--muted);
+  cursor: default; user-select: none; pointer-events: none; /* progress markers, not links */
+}
+.steps li { display: inline-flex; align-items: center; gap: 8px; }
+.steps li + li::before { content: ""; width: 24px; height: 2px; margin: 0 12px; background: var(--rim); }
+.steps .pip { width: 14px; height: 14px; border: 2px solid var(--rim); }
+.steps li[data-state="done"] { color: var(--brass); }
+.steps li[data-state="done"] .pip {
+  background: var(--brass) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 5 5' shape-rendering='crispEdges' fill='%231E1510'%3E%3Crect x='0' y='2' width='1' height='1'/%3E%3Crect x='1' y='3' width='1' height='1'/%3E%3Crect x='2' y='2' width='1' height='1'/%3E%3Crect x='3' y='1' width='1' height='1'/%3E%3Crect x='4' y='0' width='1' height='1'/%3E%3C/svg%3E") center / 10px 10px no-repeat;
+  border-color: var(--brass);
+}
+.steps li[data-state="current"] { color: var(--brass-pale); }
+.steps li[data-state="current"] .pip { background: var(--brass-pale); border-color: var(--brass-pale); outline: 2px solid var(--brass); outline-offset: 2px; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .device-chip {
   display: inline-flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 16px;
   background: transparent; color: var(--brass); border: 2px solid var(--brass);
@@ -354,3 +368,40 @@ main { max-width: 1200px; margin: 0 auto; padding: 28px 16px 96px; }
 }
 
 .porthole { cursor: grab; }
+/* ---------- Laptop height (e.g. 1366x768): keep the session's timer, pet and study circle in view ---------- */
+@media (max-height: 820px) and (min-width: 900px) {
+  .topbar { padding: 12px 16px 10px; }
+  .brand { font-size: 26px; }
+  main { padding: 16px 16px 72px; }
+  .view, .row { gap: 16px; }
+  .panel { padding: 18px 22px; gap: 12px; }
+  .nixie { zoom: .6; }
+  .porthole.xl { width: 156px; height: 156px; } .porthole.xl canvas { width: 100px; height: 100px; }
+  .status { font-size: 20px; }
+  /* the study circle rides up under the timer; gauge, log and ledger follow */
+  #view-live > * { order: 2; }
+  #view-live > .row:first-child { order: 0; }
+  #view-live > #circlePanel { order: 1; }
+  #view-live > #ledgerPanel { order: 3; }
+  .circle { gap: 12px 28px; }
+  .multiplier { font-size: 44px; }
+  .circle-body { flex-basis: 360px; gap: 8px; }
+  .friends { flex-direction: row; flex-wrap: wrap; gap: 8px 24px; }
+  .friends li { border-top: 0; padding-top: 0; }
+  .xp { padding-top: 8px; }
+}
+
+/* Stamp is ink, not a sticker: let the numbers under it show through */
+.stamp { background: rgba(239, 227, 200, 0.35); right: 54px; }
+
+@media (max-height: 820px) and (min-width: 900px) {
+  /* Time card: keep "Up next" docked at the bottom of the screen */
+  #view-card .panel.next {
+    position: sticky; bottom: 12px; z-index: 5;
+    box-shadow: 0 -14px 24px 6px rgba(20, 13, 9, 0.85);
+  }
+  /* Study circle row: name and status stay together, clear gap between friends */
+  .friends { gap: 8px 44px; }
+  .friends li { gap: 10px; }
+  .friends .who { width: auto; }
+}
