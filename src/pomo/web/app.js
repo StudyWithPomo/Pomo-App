@@ -23,6 +23,7 @@
   };
 
   // ---------- State ----------
+  function demoCircle() { return [{ name: 'Ava', focused: true }, { name: 'Dev', focused: true }]; }
   const S = {
     view: 'setup',
     settings: Object.assign({ user: 'Sidak', name: 'Mochi', body: 'bot', face: 'plain', color: 'brass', pinTime: false, pinScore: false, study: 25, brk: 5, goal: '' }, store.get('settings', {})),
@@ -30,8 +31,9 @@
     sessionNo: 1,
     session: null,
     lastCard: null,
-    circle: [{ name: 'Ava', focused: true }, { name: 'Dev', focused: true }],
+    circle: demoCircle(),
     device: { connected: false, port: null, writer: null },
+    dev: null, // latest 'state' message from the device (it owns the clock, XP and level while coupled)
     peekUntil: 0,
     speed: 1,
     idleDetector: null,
@@ -182,6 +184,7 @@
 
   // ---------- Session engine ----------
   function multiplier() {
+    if (S.device.connected && S.dev) return S.dev.mult;
     const focused = S.circle.filter((f) => f.focused).length;
     if (!S.circle.length) return 1;
     if (focused < S.circle.length) return 1; // bonus pauses while anyone drifts
@@ -192,14 +195,21 @@
     const st = S.settings;
     st.goal = $('goal').value.trim();
     save();
-    const total = st.study * 60;
-    S.session = {
-      mode: 'focus', goal: st.goal || 'Untitled session', study: st.study, brk: st.brk,
-      startedAt: new Date(), total, left: total, focusedSec: 0, xpSec: 0,
+    beginFocus(st.study, st.brk, st.goal);
+    send({ t: 'start', study: st.study, brk: st.brk });
+  }
+
+  function newFocusSession(study, brk, goal) {
+    const total = study * 60;
+    return {
+      mode: 'focus', goal: goal || 'Untitled session', study, brk,
+      startedAt: new Date(), total, left: total, focusedSec: 0, xpSec: 0, acc: 0,
       drift: null, events: [], secs: new Array(total).fill(null), log: []
     };
-    addLog(0, 'Session ' + ROMAN[S.sessionNo - 1] + ' begun' + (st.goal ? ': ' + st.goal : '') + '.');
-    send({ t: 'start', study: st.study, brk: st.brk, goal: S.session.goal });
+  }
+  function beginFocus(study, brk, goal) {
+    S.session = newFocusSession(study, brk, goal);
+    addLog(0, 'Session ' + ROMAN[S.sessionNo - 1] + ' begun' + (goal ? ': ' + goal : '') + '.');
     requestIdle();
     setCamera(true);
     show('live');
@@ -207,8 +217,10 @@
   }
 
   function startBreak(minutes, long) {
-    S.session = { mode: 'break', total: minutes * 60, left: minutes * 60, long: !!long };
-    send({ t: 'break', minutes });
+    // With a device coupled it already runs the break; its state messages drive the countdown.
+    if (!(S.device.connected && S.session && S.session.mode === 'break')) {
+      S.session = { mode: 'break', total: minutes * 60, left: minutes * 60, long: !!long };
+    }
     show('live');
     renderLive();
   }
@@ -221,7 +233,7 @@
     if (s.drift && s.drift.kind === kind && s.drift.label === label) return;
     if (s.drift) endDrift();
     s.drift = { kind, label, since: elapsed() };
-    send({ t: 'drift', kind, label, active: true });
+    if (kind !== 'camera') send({ t: 'drift', active: true, label: String(label).slice(0, 15), kind }); // the device derives camera drifts from the focus ticks
     renderLive();
   }
   function endDrift() {
@@ -234,7 +246,7 @@
       s.events.push({ kind: d.kind, label: d.label, at: d.since, len });
       addLog(d.since, (d.kind === 'idle' ? 'Went idle, no keyboard or mouse.' : d.kind === 'camera' ? 'The camera saw you: ' + d.label.toLowerCase() + '.' : 'Wandered to ' + d.label + '.') + ' Back after ' + mmss(len).replace(/^0/, '') + '.');
     }
-    send({ t: 'drift', active: false });
+    if (d.kind !== 'camera') send({ t: 'drift', active: false });
     renderLive();
   }
 
@@ -247,6 +259,7 @@
   function tick() {
     const s = S.session;
     if (!s) return;
+    if (S.device.connected) { if (S.view === 'live') renderLive(); return; } // the device owns the countdown
     for (let i = 0; i < S.speed && s.left > 0; i++) {
       if (s.mode === 'focus') {
         const idx = s.total - s.left;
@@ -263,33 +276,45 @@
     if (S.view === 'live') renderLive();
   }
 
-  function endSession(early) {
+  // m is the device's 'end' message when one is coupled; the device then supplies the numbers.
+  function endSession(early, m) {
     const s = S.session;
     if (!s || s.mode !== 'focus') return;
+    if (S.device.connected && !m) { requestDeviceEnd(); return; }
     setCamera(false); // camera only runs during focus sessions
+    if (m) s.drift = null; // the session is already over on the device; nothing more to tell it
     if (s.drift) endDrift();
     chime();
-    const done = elapsed();
-    const pct = done ? Math.round((s.focusedSec / done) * 100) : 0;
-    const focusedMin = Math.floor(s.focusedSec / 60);
-    const mult = s.focusedSec ? Math.max(1, Math.round(s.xpSec / s.focusedSec)) : 1;
-    let earned = Math.floor(s.xpSec / 60);
-    let penalty = 0;
-    if (pct < PENALTY_BELOW) { penalty = Math.min(PENALTY_XP, S.progress.xp); earned = 0; }
     const before = Object.assign({}, S.progress);
-    S.progress.xp = Math.max(0, S.progress.xp + earned - penalty);
-    let leveled = false;
-    while (S.progress.xp >= XP_PER_LEVEL) { S.progress.xp -= XP_PER_LEVEL; S.progress.level++; leveled = true; }
+    let done, pct, focusedMin, focusedSec, earned, penalty, leveled;
+    const mult = s.focusedSec ? Math.max(1, Math.round(s.xpSec / s.focusedSec)) : 1;
+    if (m) {
+      done = m.elapsed_min * 60; pct = m.pct; focusedMin = m.focused_min; focusedSec = m.focused_min * 60;
+      penalty = m.penalty ? Math.max(0, -m.xp) : 0;
+      earned = m.penalty ? 0 : Math.max(0, m.xp);
+      applyDeviceProgress(m.total_xp, m.level);
+      leveled = S.progress.level > before.level;
+    } else {
+      done = elapsed();
+      pct = done ? Math.round((s.focusedSec / done) * 100) : 0;
+      focusedMin = Math.floor(s.focusedSec / 60); focusedSec = s.focusedSec;
+      earned = Math.floor(s.xpSec / 60);
+      penalty = 0;
+      if (pct < PENALTY_BELOW) { penalty = Math.min(PENALTY_XP, S.progress.xp); earned = 0; }
+      S.progress.xp = Math.max(0, S.progress.xp + earned - penalty);
+      leveled = false;
+      while (S.progress.xp >= XP_PER_LEVEL) { S.progress.xp -= XP_PER_LEVEL; S.progress.level++; leveled = true; }
+    }
+    // Hearts are a dashboard-only flourish; the schema doesn't carry them.
     const heartDelta = pct >= 80 ? 2 : pct >= 60 ? 1 : pct < PENALTY_BELOW ? -1 : 0;
     S.progress.hearts = Math.max(0, Math.min(5, S.progress.hearts + heartDelta));
     save();
 
     S.lastCard = {
-      no: S.sessionNo, goal: s.goal, startedAt: s.startedAt, endedAt: new Date(), early,
-      total: s.total, done, focusedSec: s.focusedSec, pct, focusedMin, mult, earned, penalty,
+      no: S.sessionNo, goal: s.goal, startedAt: s.startedAt, endedAt: new Date(), early: m ? m.early : early,
+      total: s.total, done, focusedSec, pct, focusedMin, mult, earned, penalty,
       heartDelta, leveled, before, events: s.events.slice(), minutes: minuteKinds(s, true), brk: s.brk, finished: null
     };
-    send({ t: 'end', pct, xp: earned - penalty, hearts: heartDelta, level: S.progress.level });
     S.session = null;
     S.sessionNo = S.sessionNo % SESSIONS_PER_SET + 1;
     renderCard();
@@ -338,7 +363,7 @@
     $('darkNote').hidden = showTime;
     $('railFill').style.width = ((done / s.total) * 100).toFixed(1) + '%';
     $('elapsedTxt').textContent = mmss(done) + ' elapsed of ' + mmss(s.total);
-    $('endsTxt').textContent = 'ends ' + clock(new Date(Date.now() + (s.left * 1000) / S.speed));
+    $('endsTxt').textContent = 'ends ' + clock(new Date(Date.now() + (s.left * 1000) / (S.device.connected ? 1 : S.speed)));
 
     if (brk) {
       $('statusLine').textContent = 'Stretch, get water, step away. ' + petName() + ' will chime when it\'s time.';
@@ -393,11 +418,13 @@
       li.children[2].textContent = f.focused ? 'Focused' : 'Drifting';
       return li;
     }));
-    const xpNow = S.progress.xp + Math.floor(s.xpSec ? s.xpSec / 60 : 0);
+    const coupled = S.device.connected && S.dev;
+    const xpNow = coupled ? S.progress.xp : S.progress.xp + Math.floor(s.xpSec ? s.xpSec / 60 : 0);
     $('xpLevel').textContent = petName() + ' · Level ' + S.progress.level;
     $('xpText').textContent = Math.min(xpNow, XP_PER_LEVEL) + ' / ' + XP_PER_LEVEL + ' XP';
     $('xpFill').style.width = Math.min(100, (xpNow / XP_PER_LEVEL) * 100).toFixed(1) + '%';
-    $('xpSoFar').textContent = s.mode === 'focus' ? '+' + Math.floor((s.xpSec || 0) / 60) + ' XP so far (' + Math.floor(s.focusedSec / 60) + ' focused min × ' + mult + ')' : '';
+    const gained = coupled ? Math.max(0, S.dev.xp - (s.xp0 != null ? s.xp0 : S.dev.xp)) : Math.floor((s.xpSec || 0) / 60);
+    $('xpSoFar').textContent = s.mode === 'focus' ? '+' + gained + ' XP so far (' + Math.floor(s.focusedSec / 60) + ' focused min × ' + mult + ')' : '';
 
     $('ledgerPanel').hidden = brk || !showTime;
     if (!brk && showTime) renderLedger(s);
@@ -521,7 +548,6 @@
     $('finishChips').replaceChildren(...[['yes', 'Yes'], ['partly', 'Partly'], ['no', 'Not yet']].map(([k, l]) => chip(l, c.finished === k, () => {
       c.finished = k;
       if (k !== 'yes' && c.goal !== 'Untitled session') { S.settings.goal = c.goal; $('goal').value = c.goal; save(); }
-      send({ t: 'finished', value: k });
       renderFinish();
     }, 'word')));
     $('finishNote').textContent = c.finished ? notes[c.finished] : 'Your answer is saved with this time card.';
@@ -583,7 +609,8 @@
   function onCameraTick(m) {
     const s = S.session;
     if (!s || s.mode !== 'focus') return;
-    send(m); // the device's pet reacts to the same ticks (see schema/pomo-device.schema.json)
+    const f = focusMsg(m); // the device's pet reacts to the same ticks (see schema/pomo-device.schema.json)
+    if (f) send(f);
     if (CAMERA_DRIFT_STATES.includes(m.state)) {
       // Start (or switch) only on a named reason; a null reason while the score recovers keeps the current drift.
       if (CAMERA_LABELS[m.reason]) startDrift('camera', CAMERA_LABELS[m.reason]);
@@ -602,7 +629,9 @@
       const enc = new TextEncoderStream();
       enc.readable.pipeTo(port.writable);
       S.device = { connected: true, port, writer: enc.writable.getWriter() };
+      S.circle = []; // the real circle arrives from the device
       setDeviceChip();
+      renderSetup();
       sendConfig();
       readLoop(port);
     } catch (e) { toast('Could not connect: ' + (e.message || e)); }
@@ -626,33 +655,122 @@
       }
     } catch (e) { /* unplugged */ }
     S.device = { connected: false, port: null, writer: null };
+    S.dev = null;
+    S.circle = demoCircle(); // back to the local engine and demo circle
     setDeviceChip();
+    renderSetup();
+    if (S.view === 'live') renderLive();
     toast('Device disconnected.');
   }
+  // Outgoing lines are checked against schema/pomo-device.schema.json before they are written:
+  // known type, no extra fields, required fields present, and the device drops lines over 256 bytes.
+  const OUT = {
+    config: { req: [], keys: ['user', 'pet', 'time', 'tz'] },
+    start: { req: ['study', 'brk'], keys: ['study', 'brk'] },
+    drift: { req: ['active'], keys: ['active', 'label', 'kind'] },
+    focus: { req: ['ts', 'focus', 'state', 'reason'], keys: ['ts', 'focus', 'state', 'reason', 'window', 'yaw', 'pitch', 'ear'] },
+    peek: { req: [], keys: [] },
+    end: { req: ['scope'], keys: ['scope'] }
+  };
+  const FOCUS_STATES = ['calibrating', 'focused', 'drifting', 'unfocused'];
+  const FOCUS_REASONS = ['absent', 'drowsy', 'looking_away', 'slouching', 'bad_window'];
   function send(obj) {
+    const spec = OUT[obj.t];
+    const bad = !spec || Object.keys(obj).some((k) => k !== 't' && !spec.keys.includes(k)) || spec.req.some((k) => !(k in obj));
+    const line = bad ? '' : JSON.stringify(obj) + '\n';
+    if (bad || new TextEncoder().encode(line).length >= 256) { console.warn('Not sent (breaks the device schema):', obj); return; }
     if (!S.device.writer) return;
-    S.device.writer.write(JSON.stringify(obj) + '\n').catch(() => {});
+    S.device.writer.write(line).catch(() => {});
   }
   function sendConfig() {
     const st = S.settings;
-    send({ t: 'config', user: st.user, pet: { name: petName(), body: st.body, face: st.face, color: st.color }, level: S.progress.level, xp: S.progress.xp, hearts: S.progress.hearts });
+    const pet = { name: petName().slice(0, 10) };
+    if (['bot', 'cat', 'dog'].includes(st.body)) pet.body = st.body;
+    if (['plain', 'monocle'].includes(st.face)) pet.face = st.face;
+    if (['brass', 'copper', 'pewter', 'verdigris'].includes(st.color)) pet.color = st.color;
+    send({ t: 'config', user: String(st.user || '').slice(0, 16), pet, time: Math.floor(Date.now() / 1000), tz: -new Date().getTimezoneOffset() });
+  }
+  // The helper's tick carries exactly the schema's fields today; rebuild it anyway so nothing extra reaches the device.
+  function focusMsg(m) {
+    const ts = Number(m.ts), focus = Math.round(Number(m.focus));
+    if (!(ts >= 1600000000) || !(focus >= 0 && focus <= 100) || !FOCUS_STATES.includes(m.state)) return null;
+    const f = { t: 'focus', ts: Math.round(ts * 100) / 100, focus, state: m.state, reason: FOCUS_REASONS.includes(m.reason) ? m.reason : null };
+    if (typeof m.window === 'string') f.window = m.window;
+    if (Number.isFinite(m.yaw)) f.yaw = m.yaw;
+    if (Number.isFinite(m.pitch)) f.pitch = m.pitch;
+    if (Number.isFinite(m.ear) && m.ear >= 0 && m.ear <= 1) f.ear = m.ear;
+    return f;
+  }
+  // "End early" with a device coupled: ask it to end; its 'end' message builds the time card.
+  function requestDeviceEnd() {
+    send({ t: 'end', scope: 'session' });
+    clearTimeout(requestDeviceEnd.t);
+    requestDeviceEnd.t = setTimeout(() => {
+      if (S.session && S.session.mode === 'focus') toast('The device has not confirmed yet. End it on the device.');
+    }, 3000);
+  }
+  // The device reports a running XP total; the dashboard shows XP within the level.
+  function applyDeviceProgress(totalXp, level) {
+    S.progress.level = level;
+    S.progress.xp = Math.max(0, totalXp - (level - 1) * XP_PER_LEVEL);
+    save();
+  }
+  // Coupled, the dashboard keeps its per-second record (gauge, ledger) from the device's clock.
+  function accrue(s) {
+    const upto = s.total - s.left;
+    for (let i = s.acc || 0; i < upto; i++) {
+      s.secs[i] = s.drift ? s.drift.kind : 'focus';
+      if (!s.drift) { s.focusedSec++; s.xpSec += multiplier(); }
+    }
+    s.acc = Math.max(s.acc || 0, upto);
+  }
+  function onDeviceStart(m) {
+    S.sessionNo = m.session;
+    const s = S.session;
+    if (s && s.mode === 'focus') {
+      s.study = m.study; s.brk = m.brk;
+      if (s.total !== m.study * 60) { s.total = s.left = m.study * 60; s.secs = new Array(s.total).fill(null); s.acc = 0; }
+      renderLive();
+    } else {
+      beginFocus(m.study, m.brk, S.settings.goal);
+    }
+  }
+  function onDeviceState(m) {
+    S.dev = m;
+    applyDeviceProgress(m.xp, m.level);
+    let s = S.session;
+    if (m.phase === 'study') {
+      S.sessionNo = m.session;
+      if (!s || s.mode !== 'focus') { beginFocus(Math.max(1, Math.round(m.total / 60)), S.settings.brk, S.settings.goal); s = S.session; }
+      if (s.total !== m.total) { const old = s.secs; s.total = m.total; s.secs = new Array(m.total).fill(null); old.slice(0, m.total).forEach((v, i) => { s.secs[i] = v; }); }
+      s.left = m.left;
+      if (s.xp0 == null) s.xp0 = m.xp;
+      accrue(s);
+    } else if (m.phase === 'break' || m.phase === 'long_rest') {
+      if (!s) S.session = { mode: 'break', total: m.total, left: m.left, long: m.phase === 'long_rest' };
+      else if (s.mode === 'break') { s.total = m.total; s.left = m.left; s.long = m.phase === 'long_rest'; }
+    } else if (s && s.mode === 'break') { // idle again: the break is over
+      S.session = null;
+      if (S.view === 'live') { chime(); toast('Intermission over. Ready for the next session?'); show('setup'); renderSetup(); }
+    }
+    if (S.view === 'live') renderLive();
+  }
+  function onDeviceEnd(m) {
+    clearTimeout(requestDeviceEnd.t);
+    if (!S.session || S.session.mode !== 'focus') { // e.g. the page was reloaded mid-session
+      const total = m.elapsed_min * 60;
+      S.session = Object.assign(newFocusSession(Math.max(1, m.elapsed_min), S.settings.brk, S.settings.goal), { total, left: 0, startedAt: new Date(Date.now() - total * 1000), secs: new Array(total).fill(null) });
+    }
+    endSession(m.early, m);
   }
   function onDevice(m) {
     switch (m.t) {
       case 'hello': toast('Device says hello (firmware ' + (m.fw || '?') + ').'); sendConfig(); break;
-      case 'knob':
-        if (m.ev === 'press') peek();
-        else if (m.ev === 'hold' && S.session) { if (S.session.mode === 'focus') endSession(true); else { S.session = null; show('setup'); renderSetup(); } }
-        break;
-      case 'state':
-        if (S.session && typeof m.left === 'number') S.session.left = m.left;
-        break;
+      case 'start': onDeviceStart(m); break;
+      case 'state': onDeviceState(m); break;
+      case 'end': onDeviceEnd(m); break;
       case 'circle':
         if (Array.isArray(m.friends)) { S.circle = m.friends.map((f) => ({ name: String(f.name).slice(0, 10), focused: !!f.focused, pct: f.pct })); renderSetup(); if (S.view === 'live') renderLive(); }
-        break;
-      case 'pet':
-        if (m.hearts != null) S.progress.hearts = m.hearts;
-        save();
         break;
     }
   }
@@ -666,6 +784,7 @@
   // ---------- Misc ----------
   function peek() {
     if (!S.session || S.session.mode !== 'focus') return;
+    send({ t: 'peek' });
     S.peekUntil = Date.now() + 5000;
     renderLive();
     clearTimeout(peek.t);
@@ -687,6 +806,7 @@
 
   function demo(action) {
     const s = S.session;
+    if (S.device.connected && (action === 'fast' || action === 'friend' || action === 'finish')) { toast('The device owns the clock and the circle while it is coupled.'); return; }
     if (action === 'fast') { S.speed = S.speed === 1 ? 30 : 1; toast(S.speed === 1 ? 'Normal speed' : 'Speed ×30'); return; }
     if (action === 'friend') {
       const f = S.circle[1] || S.circle[0];
@@ -775,10 +895,13 @@ const HEART_SVG = '<svg viewBox="0 0 7 6" width="100%" height="100%" shape-rende
     $('pinScoreBtn').addEventListener('click', () => { S.settings.pinScore = !S.settings.pinScore; save(); renderLive(); });
     $('endBtn').addEventListener('click', () => {
       if (!S.session) return;
-      if (S.session.mode === 'focus') endSession(true); else { S.session = null; show('setup'); renderSetup(); }
+      if (S.session.mode === 'focus') endSession(true); else { send({ t: 'end', scope: 'break' }); S.session = null; show('setup'); renderSetup(); }
     });
     $('startBreakBtn').addEventListener('click', () => { const c = S.lastCard; startBreak(c && c.no === SESSIONS_PER_SET ? LONG_BREAK : (c ? c.brk : S.settings.brk), c && c.no === SESSIONS_PER_SET); });
-    $('skipBreakBtn').addEventListener('click', () => { show('setup'); renderSetup(); });
+    $('skipBreakBtn').addEventListener('click', () => {
+      if (S.device.connected) { send({ t: 'end', scope: 'break' }); if (S.session && S.session.mode === 'break') S.session = null; }
+      show('setup'); renderSetup();
+    });
     $('demoToggle').addEventListener('click', () => {
       const open = $('demoBody').hidden;
       $('demoBody').hidden = !open;
