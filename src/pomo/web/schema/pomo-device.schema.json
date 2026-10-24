@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "pomo-device-protocol",
   "title": "Study Buddy: laptop <-> ESP32 device protocol",
-  "description": "JSON Lines, one JSON object per line, 115200 baud. Transport is USB serial now and Bluetooth SPP later; every outgoing line is written to all transports and every incoming line feeds one shared handler. Both ends ignore non-JSON lines, so debug prints on the same link are safe. The device assembler drops lines over 256 bytes.\n\nMessage directions: laptop -> device: config, start, drift, focus, peek, end. Device -> laptop: hello, start, state, end, circle — the device reports only relevant session changes, never raw knob input. The two 'start' pairs and the two 'end' pairs share one t on opposite directions; they are distinguished by their fields (see defs).\n\nOwnership: the laptop is the source of truth for camera focus (PomoServer) and the session goal. The device is the source of truth for session state, XP, level and pet identity, so level/xp/hearts are never sent laptop -> device.",
+  "description": "JSON Lines, one JSON object per line, 115200 baud. Transport is USB serial now and Bluetooth SPP later; every outgoing line is written to all transports and every incoming line feeds one shared handler. Both ends ignore non-JSON lines, so debug prints on the same link are safe. The device assembler drops lines over 256 bytes.\n\nMessage directions: laptop -> device: config, start, drift, focus, peek, end, ping. Device -> laptop: hello, start, state, end, circle — the device reports only relevant session changes, never raw knob input. The two 'start' pairs and the two 'end' pairs share one t on opposite directions; they are distinguished by their fields (see defs).\n\nOwnership: the laptop is the source of truth for camera focus (PomoServer) and the session goal. The device is the source of truth for session state, XP, level and pet identity, so level/xp/hearts are never sent laptop -> device.",
   "type": "object",
   "oneOf": [
     { "$ref": "#/$defs/config" },
@@ -11,6 +11,7 @@
     { "$ref": "#/$defs/focus" },
     { "$ref": "#/$defs/peek" },
     { "$ref": "#/$defs/end_laptop" },
+    { "$ref": "#/$defs/ping" },
     { "$ref": "#/$defs/hello" },
     { "$ref": "#/$defs/start_device" },
     { "$ref": "#/$defs/state" },
@@ -142,6 +143,13 @@
         "scope": { "enum": ["session", "break"] }
       }
     },
+    "ping": {
+      "description": "Laptop -> device. Heartbeat, sent every 2 s while the laptop is coupled. If the device hears nothing from the laptop for a while it pauses the running session (state.paused) until traffic resumes. No fields.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t"],
+      "properties": { "t": { "const": "ping" } }
+    },
     "hello": {
       "description": "Device -> laptop. Sent once when the link task starts (coupling handshake). fw is the firmware version.",
       "type": "object",
@@ -214,7 +222,11 @@
           "description": "Effective circle multiplier right now (1 while anyone in the circle drifts)."
         },
         "xp": { "type": "integer", "minimum": 0 },
-        "level": { "type": "integer", "minimum": 1 }
+        "level": { "type": "integer", "minimum": 1 },
+        "paused": {
+          "type": "boolean",
+          "description": "Optional. True while the device has paused the session because the laptop went silent; false or absent otherwise."
+        }
       }
     },
     "end_device": {

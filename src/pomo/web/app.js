@@ -34,6 +34,12 @@
     circle: demoCircle(),
     device: { connected: false, port: null, writer: null },
     dev: null, // latest 'state' message from the device (it owns the clock, XP and level while coupled)
+    lost: null, // set while the link dropped mid-session: { info }; the session is frozen, not ended
+    paused: false, // the device's own 'paused' flag from its latest state
+    recon: null, // after a reconnect, the timer that waits for the device's first state
+    armed: false, // a state has arrived since the (re)connect, so silence can now mean loss
+    toastOnResume: false, // announce 'Session resumed' once the device stops reporting paused
+    lastRx: 0, // when the last device line arrived
     peekUntil: 0,
     speed: 1,
     idleDetector: null,
@@ -209,6 +215,7 @@
   }
   function beginFocus(study, brk, goal) {
     S.session = newFocusSession(study, brk, goal);
+    S.lastRx = Date.now(); // the silence watchdog counts from the start of a device session
     addLog(0, 'Session ' + ROMAN[S.sessionNo - 1] + ' begun' + (goal ? ': ' + goal : '') + '.');
     requestIdle();
     setCamera(true);
@@ -263,6 +270,7 @@
   function tick() {
     const s = S.session;
     if (!s) return;
+    if (S.lost) { if (S.view === 'live') renderLive(); return; } // frozen until the device is back
     if (S.device.connected && (s.mode === 'focus' || !s.local)) { if (S.view === 'live') renderLive(); return; } // the device owns the countdown
     for (let i = 0; i < S.speed && s.left > 0; i++) {
       if (s.mode === 'focus') {
@@ -341,6 +349,7 @@
 
   function currentMood() {
     const s = S.session;
+    if (linkDown()) return 'sad';
     if (S.isPetting && (!s || s.mode === 'break')) return 'love';
     if (!s) return 'happy';
     if (s.mode === 'break') return 'happy';
@@ -432,6 +441,7 @@
 
     $('ledgerPanel').hidden = brk || !showTime;
     if (!brk && showTime) renderLedger(s);
+    renderLinkOverlay();
   }
 
   function renderLedger(s) {
@@ -634,25 +644,39 @@
 
   // ---------- Device (Web Serial, JSON lines) ----------
   async function connectDevice() {
+    if (S.lost) { reconnectDevice(true); return; }
     if (S.device.connected) return;
     if (!('serial' in navigator)) { toast('Web Serial needs Chrome or Edge on localhost.'); return; }
     try {
       const port = await navigator.serial.requestPort();
-      await port.open({ baudRate: 115200 });
-      const enc = new TextEncoderStream();
-      enc.readable.pipeTo(port.writable);
-      S.device = { connected: true, port, writer: enc.writable.getWriter() };
+      await attachPort(port);
       S.circle = []; // the real circle arrives from the device
-      setDeviceChip();
       renderSetup();
-      sendConfig();
-      readLoop(port);
     } catch (e) { toast('Could not connect: ' + (e.message || e)); }
+  }
+  // Open the port and start talking; used for the first connect and for a reconnect.
+  // stale() lets a timed-out attempt that finally opens close the port again instead of taking over.
+  async function attachPort(port, stale) {
+    if (port.readable || port.writable) { try { await port.close(); } catch (e) { /* already closing */ } }
+    await port.open({ baudRate: 115200 });
+    // Keep DTR/RTS low so opening the port doesn't reset the ESP32.
+    try { await port.setSignals({ dataTerminalReady: false, requestToSend: false }); } catch (e) { /* not supported (e.g. Bluetooth) */ }
+    if (stale && stale()) { try { await port.close(); } catch (e) { /* ignore */ } return false; }
+    const enc = new TextEncoderStream();
+    enc.readable.pipeTo(port.writable);
+    S.device = { connected: true, port, writer: enc.writable.getWriter(), stop: null };
+    S.lastRx = Date.now();
+    S.armed = false;
+    setDeviceChip();
+    sendConfig();
+    readLoop(port);
+    return true;
   }
   async function readLoop(port) {
     const dec = new TextDecoderStream();
     port.readable.pipeTo(dec.writable).catch(() => {});
     const reader = dec.readable.getReader();
+    if (S.device.port === port) S.device.stop = () => reader.cancel().catch(() => {});
     let buf = '';
     try {
       for (;;) {
@@ -663,17 +687,169 @@
         while ((i = buf.indexOf('\n')) >= 0) {
           const line = buf.slice(0, i).trim();
           buf = buf.slice(i + 1);
-          if (line) { try { onDevice(JSON.parse(line)); } catch (e) { /* ignore non-JSON debug prints */ } }
+          if (line) {
+            S.lastRx = Date.now();
+            try { onDevice(JSON.parse(line)); } catch (e) { /* ignore non-JSON debug prints */ }
+          }
         }
       }
     } catch (e) { /* unplugged */ }
+    if (S.device.port === port) linkLost(); // not already handled (e.g. by the silence watchdog)
+  }
+
+  // A device session is running: it is frozen, not ended, when the link drops.
+  function deviceSessionRunning() {
+    const s = S.session;
+    return !!(S.device.connected && s && (s.mode === 'focus' || !s.local));
+  }
+  const linkDown = () => !!(S.lost || S.paused || S.recon);
+  // The link dropped (the read loop ended, or the device went silent).
+  function linkLost() {
+    const dev = S.device;
+    if (!dev.connected) return;
+    const running = deviceSessionRunning();
     S.device = { connected: false, port: null, writer: null };
+    try { if (dev.stop) dev.stop(); dev.writer.close().catch(() => {}); } catch (e) { /* already gone */ }
+    setTimeout(() => { if (dev.port && dev.port.close && S.device.port !== dev.port) dev.port.close().catch(() => {}); }, 300);
+    if (running) {
+      let info = {};
+      try { info = dev.port.getInfo(); } catch (e) { /* unknown */ }
+      S.lost = { info, port: dev.port };
+      scheduleRetry();
+      setDeviceChip();
+      if (S.view === 'live') renderLive();
+      return;
+    }
     S.dev = null;
     S.circle = demoCircle(); // back to the local engine and demo circle
     setDeviceChip();
     renderSetup();
     if (S.view === 'live') renderLive();
     toast('Device disconnected.');
+  }
+  // No line from the device for 6 s while a device session runs. An idle device sends nothing,
+  // so this is armed only by a state after the (re)connect, and only while that state says a session is on.
+  const BUSY_PHASES = ['study', 'break', 'long_rest', 'ready'];
+  function linkWatch() {
+    if (S.armed && S.dev && BUSY_PHASES.includes(S.dev.phase) && deviceSessionRunning() && Date.now() - S.lastRx > 6000) linkLost();
+  }
+  // Reopen the port after a loss. Button click: may ask which port. Plug-in event: only already-allowed ports.
+  // Same device as the one we lost: USB vendor/product id, or the Bluetooth service class id.
+  function samePort(p, info) {
+    try {
+      const a = p.getInfo();
+      if (a.usbVendorId != null) return a.usbVendorId === info.usbVendorId && a.usbProductId === info.usbProductId;
+      if (a.bluetoothServiceClassId != null) return String(a.bluetoothServiceClassId).toLowerCase() === String(info.bluetoothServiceClassId).toLowerCase();
+    } catch (e) { /* no info */ }
+    return false;
+  }
+  // Reopen the port we lost: the exact SerialPort object first, then granted ports that match it,
+  // and the picker only when asked to and there is not exactly one match. One attempt at a time, 8 s at most.
+  async function reconnectDevice(askUser) {
+    if (!S.lost || reconnectDevice.busy) return;
+    reconnectDevice.busy = true;
+    let timedOut = false, picking = false, clock;
+    const stale = () => timedOut || !S.lost;
+    const attempt = (async () => {
+      const lost = S.lost;
+      const matches = (await navigator.serial.getPorts()).filter((p) => p !== lost.port && samePort(p, lost.info));
+      // Fall back to a granted port only when exactly one matches; with several, guessing could pick the wrong device.
+      const candidates = (lost.port ? [lost.port] : []).concat(matches.length === 1 ? matches : []);
+      let failure = null;
+      for (const port of candidates) {
+        try {
+          if (!(await attachPort(port, stale))) return;
+          if (stale()) return;
+          S.lost = null;
+          clearTimeout(retryTimer);
+          S.toastOnResume = true;
+          // Keep the notice up until the device's first state says whether its session survived.
+          S.recon = setTimeout(() => endLostSession(true), 5000);
+          renderLinkOverlay();
+          return;
+        } catch (e) { failure = e; }
+      }
+      if (matches.length !== 1 && askUser) {
+        picking = true; // the 8 s limit is for open(), not for the person choosing
+        const port = await navigator.serial.requestPort();
+        picking = false;
+        if (await attachPort(port, stale) && !stale()) {
+          S.lost = null;
+          clearTimeout(retryTimer);
+          S.toastOnResume = true;
+          S.recon = setTimeout(() => endLostSession(true), 5000);
+          renderLinkOverlay();
+        }
+        return;
+      }
+      if (failure) throw failure;
+    })();
+    const limit = new Promise((resolve, reject) => { clock = setTimeout(() => { if (picking) return; timedOut = true; reject(new Error('timed out')); }, 8000); });
+    try { await Promise.race([attempt, limit]); }
+    catch (e) { if (askUser) toast('Could not reconnect: ' + (e.message || e)); }
+    finally { clearTimeout(clock); reconnectDevice.busy = false; }
+  }
+  // While the notice is up, keep looking for the device: every 3 s, after the last try has finished.
+  let retryTimer = null;
+  function scheduleRetry() {
+    clearTimeout(retryTimer);
+    retryTimer = setTimeout(async () => {
+      if (!S.lost) return;
+      await reconnectDevice(false);
+      if (S.lost) scheduleRetry();
+    }, 3000);
+  }
+  function settleReconnect() {
+    if (!S.recon) return;
+    clearTimeout(S.recon);
+    S.recon = null;
+    maybeResumed();
+    if (S.view === 'live') renderLive();
+  }
+  function maybeResumed() {
+    if (!S.toastOnResume || S.paused || S.recon) return;
+    S.toastOnResume = false;
+    toast('Reconnected. Session resumed.');
+  }
+  // The device restarted (USB power loss) so its session is gone: end the frozen one cleanly.
+  // XP and level stay as the device reports them. forgetState: the last state we hold is stale.
+  function endLostSession(forgetState) {
+    clearTimeout(S.recon); S.recon = null; S.toastOnResume = false;
+    clearTimeout(retryTimer);
+    S.lost = null; S.paused = false;
+    if (forgetState) S.dev = null;
+    if (S.session && S.session.mode === 'focus') setCamera(false);
+    S.session = null;
+    S.peekUntil = 0;
+    renderLinkOverlay();
+    show('setup');
+    renderSetup();
+    toast(petName() + " restarted, so that session ended. Start a new one when you're ready.");
+  }
+  function leaveLostSession() {
+    clearTimeout(S.recon); S.recon = null; S.toastOnResume = false;
+    clearTimeout(retryTimer);
+    S.lost = null; S.paused = false; S.dev = null;
+    if (S.session && S.session.mode === 'focus') setCamera(false);
+    S.session = null;
+    S.circle = demoCircle();
+    setDeviceChip();
+    show('setup');
+    renderSetup();
+  }
+  function renderLinkOverlay() {
+    const down = linkDown();
+    const box = $('linkLost');
+    box.classList.toggle('show', down);
+    box.setAttribute('aria-hidden', String(!down));
+    $('timerPanel').classList.toggle('frozen', down);
+    for (const el of $('view-live').children) if (el !== box) el.inert = down;
+    if (!down) return;
+    $('linkLostTitle').textContent = petName() + ' lost the device';
+    $('linkLostTry').textContent = S.lost ? 'Looking for ' + petName() + '…' : '';
+    $('reconnectBtn').hidden = !S.lost;
+    $('leaveBtn').hidden = !S.lost;
+    StudyPet.drawPet($('petLost'), petOpts(currentMood()));
   }
   // Outgoing lines are checked against schema/pomo-device.schema.json before they are written:
   // known type, no extra fields, required fields present, and the device drops lines over 256 bytes.
@@ -683,7 +859,8 @@
     drift: { req: ['active'], keys: ['active', 'label', 'kind'] },
     focus: { req: ['ts', 'focus', 'state', 'reason'], keys: ['ts', 'focus', 'state', 'reason', 'window', 'yaw', 'pitch', 'ear'] },
     peek: { req: [], keys: [] },
-    end: { req: ['scope'], keys: ['scope'] }
+    end: { req: ['scope'], keys: ['scope'] },
+    ping: { req: [], keys: [] }
   };
   const FOCUS_STATES = ['calibrating', 'focused', 'drifting', 'unfocused'];
   const FOCUS_REASONS = ['absent', 'drowsy', 'looking_away', 'slouching', 'bad_window'];
@@ -750,7 +927,11 @@
   }
   function onDeviceState(m) {
     S.dev = m;
+    S.paused = m.paused === true;
+    S.armed = true;
     applyDeviceProgress(m.xp, m.level);
+    if (S.recon && m.phase === 'idle') { endLostSession(false); return; } // it restarted: nothing to resume
+    if (S.recon) settleReconnect(); else maybeResumed();
     let s = S.session;
     if (m.phase === 'study') {
       S.sessionNo = m.session;
@@ -762,7 +943,7 @@
     } else if (m.phase === 'break' || m.phase === 'long_rest') {
       if (!s) S.session = { mode: 'break', total: m.total, left: m.left, long: m.phase === 'long_rest' };
       else if (s.mode === 'break') { s.total = m.total; s.left = m.left; s.long = m.phase === 'long_rest'; s.local = false; }
-    } else if (s && s.mode === 'break' && !s.local) { // idle again: the break is over
+    } else if (m.phase === 'idle' && s && s.mode === 'break' && !s.local) { // idle again: the break is over
       S.session = null;
       if (S.view === 'live') { chime(); toast('Intermission over. Ready for the next session?'); show('setup'); renderSetup(); }
     }
@@ -778,7 +959,9 @@
   }
   function onDevice(m) {
     switch (m.t) {
-      case 'hello': toast('Device says hello (firmware ' + (m.fw || '?') + ').'); sendConfig(); break;
+      case 'hello':
+        if (S.lost || S.recon) { endLostSession(true); sendConfig(); break; } // a hello after a reconnect means it rebooted
+        toast('Device says hello (firmware ' + (m.fw || '?') + ').'); sendConfig(); break;
       case 'start': onDeviceStart(m); break;
       case 'state': onDeviceState(m); break;
       case 'end': onDeviceEnd(m); break;
@@ -789,14 +972,14 @@
   }
   function setDeviceChip() {
     $('deviceLamp').className = 'lamp' + (S.device.connected ? ' on' : '');
-    $('deviceText').textContent = S.device.connected ? 'Device coupled · USB' : 'Connect device';
+    $('deviceText').textContent = S.device.connected ? 'Device coupled · USB' : S.lost ? 'Device lost · Reconnect' : 'Connect device';
     $('sendPetBtn').disabled = !S.device.connected;
     $('sentNote').textContent = S.device.connected ? '' : 'Connect the device to send.';
   }
 
   // ---------- Misc ----------
   function peek() {
-    if (!S.session || S.session.mode !== 'focus') return;
+    if (!S.session || S.session.mode !== 'focus' || linkDown()) return;
     send({ t: 'peek' });
     S.peekUntil = Date.now() + 5000;
     renderLive();
@@ -819,6 +1002,7 @@
 
   function demo(action) {
     const s = S.session;
+    if (linkDown()) { toast('The session is paused until the device is back.'); return; }
     if (S.device.connected && (action === 'fast' || action === 'friend' || action === 'finish')) { toast('The device owns the clock and the circle while it is coupled.'); return; }
     if (action === 'fast') { S.speed = S.speed === 1 ? 30 : 1; toast(S.speed === 1 ? 'Normal speed' : 'Speed ×30'); return; }
     if (action === 'friend') {
@@ -936,7 +1120,11 @@ const HEART_SVG = '<svg viewBox="0 0 7 6" width="100%" height="100%" shape-rende
     show('setup');
     renderSetup();
     connectHelper();
-    setInterval(tick, 1000);
+    setInterval(() => { tick(); linkWatch(); }, 1000);
+    setInterval(() => { if (S.device.connected) send({ t: 'ping' }); }, 2000);
+    $('reconnectBtn').addEventListener('click', () => reconnectDevice(true));
+    $('leaveBtn').addEventListener('click', leaveLostSession);
+    if ('serial' in navigator) navigator.serial.addEventListener('connect', () => reconnectDevice(false));
   }
   document.addEventListener('DOMContentLoaded', init);
 })();

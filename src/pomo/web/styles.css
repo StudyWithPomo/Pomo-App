@@ -291,6 +291,23 @@ main { max-width: 1200px; margin: 0 auto; padding: 28px 16px 96px; }
   .multiplier { font-size: 56px; }
   .panel { padding: 20px; }
 }
+/* Device lost: the live view freezes and dims behind a notice */
+#view-live { position: relative; }
+.frozen { opacity: .45; }
+.link-lost {
+  position: absolute; inset: 0; z-index: 5; display: flex; align-items: flex-start; justify-content: center; padding-top: 12vh;
+  background: rgba(30, 21, 16, .78);
+  opacity: 0; visibility: hidden; transition: opacity .4s steps(4, end), visibility 0s linear .4s;
+}
+.link-lost.show { opacity: 1; visibility: visible; transition: opacity .4s steps(4, end), visibility 0s; }
+.link-card {
+  width: min(440px, calc(100% - 32px)); display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center;
+  background: var(--panel); border: 4px solid var(--brass); outline: 2px solid var(--rim); outline-offset: -8px; padding: 24px 20px;
+}
+.link-card p { margin: 0; color: var(--text-soft); }
+@media (prefers-reduced-motion: reduce) {
+  .link-lost, .link-lost.show { transition: none; }
+}
 @media (prefers-reduced-motion: reduce) {
   .print, .print .stamp { animation: none; }
   .rail-fill, .tube .lit { transition: none; }
