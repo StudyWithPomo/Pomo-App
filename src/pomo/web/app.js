@@ -459,6 +459,7 @@
 
       c.mood = c.pct >= 60 ? 'love' : c.pct >= PENALTY_BELOW ? 'happy' : 'annoyed';
       StudyPet.drawPet($('petCard'), petOpts(c.mood));
+      if (c.leveled) levelUpMoment(c);
       $('petVerdict').textContent = c.leveled ? petName() + ' reached Level ' + S.progress.level + '!' + (S.progress.level === 5 ? ' Goggles unlocked.' : S.progress.level === 10 ? ' Bow tie unlocked.' : S.progress.level === 15 ? ' Top hat unlocked.' : '') :
       c.pct >= 80 ? petName() + ' is most proud.' : c.pct >= PENALTY_BELOW ? petName() + ' is content.' : petName() + ' is disappointed, but you keep your level.';
     $('cardLevel').textContent = 'Lv ' + S.progress.level;
@@ -483,6 +484,35 @@
     const long = c.no === SESSIONS_PER_SET;
     $('nextTitle').textContent = long ? 'Long rest · ' + LONG_BREAK + ' minutes' : 'Intermission · ' + c.brk + ' minutes';
     $('nextSub').textContent = long ? 'You finished a full set of four. Step away properly.' : 'Then session ' + ROMAN[S.sessionNo - 1] + ' of IV.' + (S.sessionNo === SESSIONS_PER_SET ? ' After that, a long rest.' : '');
+  }
+
+  // Brief burst + banner on the time card. The new accessory pops in mid-burst.
+  function levelUpMoment(c) {
+    const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const banner = $('levelUp');
+    const burst = $('levelBurst');
+    const lvl = S.progress.level;
+    banner.textContent = 'Level ' + lvl + '!';
+    banner.hidden = false;
+    burst.replaceChildren();
+    if (!still) {
+      for (let i = 0; i < 12; i++) {
+        const a = (i / 12) * Math.PI * 2, d = 46 + (i % 2) * 14;
+        const b = document.createElement('i');
+        b.style.setProperty('--dx', Math.round(Math.cos(a) * d) + 'px');
+        b.style.setProperty('--dy', Math.round(Math.sin(a) * d) + 'px');
+        b.style.setProperty('--c', ['var(--brass-pale)', 'var(--brass)', 'var(--copper-soft)'][i % 3]);
+        burst.appendChild(b);
+      }
+      // Draw the pet without the new accessory, then swap it in as the burst peaks.
+      if (lvl === 5 || lvl === 10 || lvl === 15) {
+        StudyPet.drawPet($('petCard'), Object.assign(petOpts(c.mood), { level: lvl - 1 }));
+        setTimeout(() => { if (S.lastCard === c) drawPets(); }, 350);
+      }
+    }
+    banner.classList.remove('go'); void banner.offsetWidth;
+    if (!still) banner.classList.add('go');
+    setTimeout(() => { banner.hidden = true; burst.replaceChildren(); }, 1400);
   }
 
   function renderFinish() {
