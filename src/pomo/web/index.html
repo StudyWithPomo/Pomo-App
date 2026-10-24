@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Study Buddy</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -29,11 +30,11 @@
 
 <header class="topbar">
   <span class="brand">Study Buddy</span>
-  <nav class="steps" aria-label="Session steps">
-    <span data-step="setup">Setup</span>
-    <span data-step="live">Session</span>
-    <span data-step="card">Time card</span>
-  </nav>
+  <ol class="steps" aria-label="Progress">
+    <li data-step="setup"><span class="pip" aria-hidden="true"></span>Setup<span class="sr" hidden> (done)</span></li>
+    <li data-step="live"><span class="pip" aria-hidden="true"></span>Session<span class="sr" hidden> (done)</span></li>
+    <li data-step="card"><span class="pip" aria-hidden="true"></span>Time card<span class="sr" hidden> (done)</span></li>
+  </ol>
   <button id="deviceBtn" class="device-chip" type="button">
     <span class="lamp" id="deviceLamp"></span><span id="deviceText">Connect device</span>
   </button>
