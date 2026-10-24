@@ -1,0 +1,10 @@
+# Substring matches, case-insensitive, against the app name and window title.
+# "study" is checked first, then "distraction"; anything else is "neutral".
+# Edit freely. Browsers need title patterns since the app is just "firefox".
+study:
+  apps: [code, vscodium, jetbrains, pycharm, obsidian, anki, zotero, okular, evince, libreoffice, ghostty, kitty, gnome-terminal]
+  titles: [khan academy, wikipedia, overleaf, google docs, canvas, coursera, leetcode, github, stack overflow, lecture, arxiv]
+
+distraction:
+  apps: [steam, lutris, heroic]
+  titles: [youtube, netflix, twitch, reddit, tiktok, instagram, facebook, twitter, "x.com", prime video, hulu, disney+]

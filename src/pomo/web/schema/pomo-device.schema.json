@@ -1,0 +1,265 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "pomo-device-protocol",
+  "title": "Study Buddy: laptop <-> ESP32 device protocol",
+  "description": "JSON Lines, one JSON object per line, 115200 baud. Transport is USB serial now and Bluetooth SPP later; every outgoing line is written to all transports and every incoming line feeds one shared handler. Both ends ignore non-JSON lines, so debug prints on the same link are safe. The device assembler drops lines over 256 bytes.\n\nMessage directions: laptop -> device: config, start, drift, focus, peek, end. Device -> laptop: hello, start, state, end, circle — the device reports only relevant session changes, never raw knob input. The two 'start' pairs and the two 'end' pairs share one t on opposite directions; they are distinguished by their fields (see defs).\n\nOwnership: the laptop is the source of truth for camera focus (PomoServer) and the session goal. The device is the source of truth for session state, XP, level and pet identity, so level/xp/hearts are never sent laptop -> device.",
+  "type": "object",
+  "oneOf": [
+    { "$ref": "#/$defs/config" },
+    { "$ref": "#/$defs/start_laptop" },
+    { "$ref": "#/$defs/drift" },
+    { "$ref": "#/$defs/focus" },
+    { "$ref": "#/$defs/peek" },
+    { "$ref": "#/$defs/end_laptop" },
+    { "$ref": "#/$defs/hello" },
+    { "$ref": "#/$defs/start_device" },
+    { "$ref": "#/$defs/state" },
+    { "$ref": "#/$defs/end_device" },
+    { "$ref": "#/$defs/circle" }
+  ],
+  "$defs": {
+    "config": {
+      "description": "Laptop -> device. Pet/user config, sent at coupling and on resync. Only given fields are applied; omitted pet fields keep the current value.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t"],
+      "properties": {
+        "t": { "const": "config" },
+        "user": {
+          "type": "string",
+          "maxLength": 16,
+          "description": "Student name, shown on the boot screen."
+        },
+        "pet": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": { "type": "string", "minLength": 1, "maxLength": 10 },
+            "body": { "enum": ["bot", "cat", "dog"] },
+            "face": { "enum": ["plain", "monocle"] },
+            "color": { "enum": ["brass", "copper", "pewter", "verdigris"] }
+          }
+        },
+        "time": {
+          "type": "integer",
+          "minimum": 1600000000,
+          "description": "Current epoch seconds, used to set the device clock."
+        },
+        "tz": {
+          "type": "integer",
+          "minimum": -840,
+          "maximum": 840,
+          "description": "UTC offset in minutes, east positive."
+        }
+      }
+    },
+    "start_laptop": {
+      "description": "Laptop -> device. Starts a study set when no phase is running. The device snaps study to 15/25/45/60 and clamps brk to the allowed range (15 -> 3..5, 25 -> 5..8, 45 -> 9..15, 60 -> 12..20). A start while a phase is running is ignored.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t", "study", "brk"],
+      "properties": {
+        "t": { "const": "start" },
+        "study": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 120,
+          "description": "Study minutes; snapped to the nearest of 15/25/45/60 on the device."
+        },
+        "brk": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Break minutes; clamped to 1/5..1/3 of the snapped study length on the device."
+        }
+      }
+    },
+    "drift": {
+      "description": "Laptop -> device. Starts or stops a drift. active:true with a label starts it; active:false ends it and clears the label. Drifts are screen (kind site), idle (kind idle), or sustained camera (kind camera); the device scores them identically, kind is for the frontend and defaults to site. A minute with 15+ seconds of drift is a drift minute.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t", "active"],
+      "properties": {
+        "t": { "const": "drift" },
+        "active": { "type": "boolean" },
+        "label": {
+          "type": "string",
+          "maxLength": 16,
+          "description": "What drifted, e.g. 'YouTube', 'Idle', 'Camera'. Truncated to 15 chars on the device."
+        },
+        "kind": { "enum": ["site", "idle", "camera"] }
+      }
+    },
+    "focus": {
+      "description": "Laptop -> device. Camera focus telemetry from PomoServer (webcam face analyzer), streamed at the PomoServer tick rate (default 2 Hz, --hz) while a session is running. Mirrors PomoServer stdout; the fields the pet acts on are focus/state/reason, the rest is diagnostic. The firmware merges sustained 'unfocused'/'drifting' ticks into its drift logic; ticks are ignored while idle.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t", "ts", "focus", "state", "reason"],
+      "properties": {
+        "t": { "const": "focus" },
+        "ts": { "type": "number", "minimum": 1600000000, "description": "Unix epoch seconds, two decimals." },
+        "focus": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Smoothed focus score."
+        },
+        "state": { "enum": ["calibrating", "focused", "drifting", "unfocused"] },
+        "reason": {
+          "anyOf": [
+            { "type": "null" },
+            { "enum": ["absent", "drowsy", "looking_away", "slouching", "bad_window"] }
+          ],
+          "description": "Highest-priority active reason; null when none."
+        },
+        "window": {
+          "type": "string",
+          "description": "Active window category from the window source; 'neutral' until a real source lands."
+        },
+        "yaw": { "type": "number", "description": "Head yaw vs baseline, degrees." },
+        "pitch": { "type": "number", "description": "Head pitch vs baseline, degrees." },
+        "ear": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Mean eye aspect ratio; below ~0.20 reads as drowsy."
+        }
+      }
+    },
+    "peek": {
+      "description": "Laptop -> device. Lights the nixie timer on the device for 5 s. No fields.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t"],
+      "properties": { "t": { "const": "peek" } }
+    },
+    "end_laptop": {
+      "description": "Laptop -> device. Ends the current study session early (the 'End early' button). Only works while studying; the device responds with an end_device message. Not yet honoured by the firmware — added for the update.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t"],
+      "properties": { "t": { "const": "end" } }
+    },
+    "hello": {
+      "description": "Device -> laptop. Sent once when the link task starts (coupling handshake). fw is the firmware version.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t", "fw"],
+      "properties": {
+        "t": { "const": "hello" },
+        "fw": { "type": "string" }
+      }
+    },
+    "start_device": {
+      "description": "Device -> laptop. Sent when a study session begins (session I and after each break). Values are the snapped/clamped lengths the device is actually running.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t", "study", "brk", "session"],
+      "properties": {
+        "t": { "const": "start" },
+        "study": { "enum": [15, 25, 45, 60] },
+        "brk": { "type": "integer" },
+        "session": { "type": "integer", "minimum": 1, "maximum": 4 }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "study": { "const": 15 } } },
+          "then": { "properties": { "brk": { "minimum": 3, "maximum": 5 } } }
+        },
+        {
+          "if": { "properties": { "study": { "const": 25 } } },
+          "then": { "properties": { "brk": { "minimum": 5, "maximum": 8 } } }
+        },
+        {
+          "if": { "properties": { "study": { "const": 45 } } },
+          "then": { "properties": { "brk": { "minimum": 9, "maximum": 15 } } }
+        },
+        {
+          "if": { "properties": { "study": { "const": 60 } } },
+          "then": { "properties": { "brk": { "minimum": 12, "maximum": 20 } } }
+        }
+      ]
+    },
+    "state": {
+      "description": "Device -> laptop. Current session state, once per second while study/break/long rest runs and once when returning to idle. The device owns the countdown; the dashboard follows it. left/total are the remaining and total seconds of the current phase (0 when idle).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t", "left", "total", "phase", "focus", "session", "drift", "drift_s", "mult", "xp", "level"],
+      "properties": {
+        "t": { "const": "state" },
+        "left": { "type": "integer", "minimum": 0 },
+        "total": { "type": "integer", "minimum": 0 },
+        "phase": { "enum": ["idle", "study", "break", "long_rest"] },
+        "focus": {
+          "enum": ["focused", "drift"],
+          "description": "drift while any drift source (site, idle, camera) is active."
+        },
+        "session": { "type": "integer", "minimum": 1, "maximum": 4 },
+        "drift": {
+          "type": "string",
+          "maxLength": 15,
+          "description": "Active drift label, '' when none."
+        },
+        "drift_s": { "type": "integer", "minimum": 0, "description": "Seconds the current drift has been active." },
+        "mult": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3,
+          "description": "Effective circle multiplier right now (1 while anyone in the circle drifts)."
+        },
+        "xp": { "type": "integer", "minimum": 0 },
+        "level": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "end_device": {
+      "description": "Device -> laptop. Final result when a study session ends (naturally or via end_laptop / knob hold). xp is the delta (may be -10); total_xp is the running total afterwards. penalty is true when pct < 50 after at least a full minute: no XP earned and -10 XP, never below the current level's floor.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t", "pct", "xp", "level", "total_xp", "focused_min", "elapsed_min", "penalty", "early"],
+      "properties": {
+        "t": { "const": "end" },
+        "pct": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Focused minutes / elapsed minutes x 100."
+        },
+        "xp": { "type": "integer", "minimum": -10, "description": "XP delta for this session." },
+        "level": { "type": "integer", "minimum": 1, "description": "Level after applying the delta." },
+        "total_xp": { "type": "integer", "minimum": 0, "description": "XP total after the delta." },
+        "focused_min": { "type": "integer", "minimum": 0 },
+        "elapsed_min": { "type": "integer", "minimum": 0 },
+        "penalty": { "type": "boolean" },
+        "early": {
+          "type": "boolean",
+          "description": "True when the session ended early (partial last minute not counted)."
+        }
+      }
+    },
+    "circle": {
+      "description": "Device -> laptop. Study circle from ESP-NOW, sent when the set of nearby friends changes (including to empty). Friends are other Study Buddy devices in the circle; pct is their last session's focus percent (0 while mid-session). Up to 4 friends are tracked.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t", "friends"],
+      "properties": {
+        "t": { "const": "circle" },
+        "friends": {
+          "type": "array",
+          "maxItems": 4,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "focused", "pct"],
+            "properties": {
+              "name": { "type": "string", "maxLength": 10 },
+              "focused": {
+                "type": "boolean",
+                "description": "Whether the friend's device is focused (not drifting) right now."
+              },
+              "pct": { "type": "integer", "minimum": 0, "maximum": 100 }
+            }
+          }
+        }
+      }
+    }
+  }
+}

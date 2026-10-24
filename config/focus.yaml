@@ -1,0 +1,35 @@
+# Focus thresholds for pomo-companion.
+# Edit values here; unknown keys raise an error.
+
+# Calibration: how long and how many face samples before scoring starts.
+calibration_s: 5.0
+min_calibration_samples: 5
+absent_after_s: 3.0
+
+# Drowsy: eye-narrowing (EAR) and penalty for being drowsy.
+ear_closed: 0.20
+drowsy_after_s: 1.5
+penalty_drowsy: 50.0
+
+# Looking away: head yaw/pitch limits vs baseline and penalty.
+yaw_max_deg: 25.0
+pitch_max_deg: 20.0
+away_after_s: 2.0
+penalty_away: 40.0
+
+# Slouching: face-size / vertical-position changes vs baseline and penalty.
+size_ratio_max: 1.25
+face_y_max_delta: 0.12
+slouch_after_s: 5.0
+penalty_slouch: 20.0
+
+# Bad window: penalty for the window being a distraction.
+penalty_bad_window: 50.0
+
+# Smoothing: EMA that smooths the score over time.
+ema_alpha: 0.2
+
+# States: score thresholds for focused / drifting / unfocus + hysteresis.
+focused_at: 70.0
+drifting_at: 40.0
+hysteresis: 5.0

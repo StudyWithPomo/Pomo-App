@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Study Buddy</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IM+Fell+English+SC&family=Libre+Caslon+Text:ital,wght@0,400;0,700;1,400&family=IBM+Plex+Mono:wght@300;400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- Shared SVG defs for the nixie tubes -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <pattern id="nxHex" width="8" height="13.86" patternUnits="userSpaceOnUse">
+      <path d="M4 0 L8 2.31 L8 6.93 L4 9.24 L0 6.93 L0 2.31 Z M4 9.24 L4 13.86" fill="none" stroke="#C07A44" stroke-width="0.6" opacity="0.6"/>
+    </pattern>
+    <linearGradient id="nxGlass" x1="0" x2="1">
+      <stop offset="0" stop-color="#fff" stop-opacity="0.16"/><stop offset="0.22" stop-color="#fff" stop-opacity="0.03"/>
+      <stop offset="0.8" stop-color="#fff" stop-opacity="0.02"/><stop offset="1" stop-color="#fff" stop-opacity="0.12"/>
+    </linearGradient>
+    <radialGradient id="nxHaze" cx="0.5" cy="0.5" r="0.6">
+      <stop offset="0" stop-color="#FF7A1A" stop-opacity="0.28"/><stop offset="1" stop-color="#FF7A1A" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="nxDot" x="-100%" y="-100%" width="300%" height="300%">
+      <feGaussianBlur stdDeviation="2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+</svg>
+
+<header class="topbar">
+  <span class="brand">Study Buddy</span>
+  <nav class="steps" aria-label="Session steps">
+    <span data-step="setup">Setup</span>
+    <span data-step="live">Session</span>
+    <span data-step="card">Time card</span>
+  </nav>
+  <button id="deviceBtn" class="device-chip" type="button">
+    <span class="lamp" id="deviceLamp"></span><span id="deviceText">Connect device</span>
+  </button>
+</header>
+
+<main>
+  <!-- ============ SETUP ============ -->
+  <section id="view-setup" class="view">
+    <div class="row" style="align-items: flex-start">
+      <section class="panel grow">
+        <h1 class="display">Before you begin</h1>
+
+        <div class="field">
+          <label for="goal" class="label">What are you working on?</label>
+          <input id="goal" class="input" maxlength="60" placeholder="e.g. Problem set 4, questions 1–6">
+          <span class="hint">Shown on the time card, where you'll mark whether it got done.</span>
+        </div>
+
+        <div class="field">
+          <span class="label">Study</span>
+          <div class="chips" id="studyChips"></div>
+        </div>
+
+        <div class="field">
+          <div class="label-row"><span class="label verd">Break</span><span class="hint" id="breakRule"></span></div>
+          <div class="chips" id="breakChips"></div>
+        </div>
+
+        <div class="actions">
+          <button id="beginBtn" class="btn primary" type="button">Begin</button>
+          <span class="hint" id="circleHint"></span>
+        </div>
+      </section>
+
+      <section class="panel side">
+        <h2 class="display sm">Your companion</h2>
+        <div class="companion">
+          <div class="porthole lg"><canvas id="petSetup" width="128" height="128" aria-hidden="true"></canvas></div>
+          <span class="label" id="petTitle">Mochi · Lv 3</span>
+        </div>
+        <div class="field">
+          <label for="petName" class="label sm">Name</label>
+          <input id="petName" class="input" maxlength="10">
+          <span class="hint">Up to 10 letters, so it fits the device screen.</span>
+        </div>
+        <div class="field"><span class="label sm">Body</span><div class="chips" id="bodyChips"></div></div>
+        <div class="field"><span class="label sm">Face</span><div class="chips" id="faceChips"></div></div>
+        <div class="field"><span class="label sm" id="finishLabel">Finish</span><div class="chips" id="colorChips"></div></div>
+        <div class="actions">
+          <button id="sendPetBtn" class="btn ghost" type="button">Send to device</button>
+          <span class="hint verd" id="sentNote"></span>
+        </div>
+      </section>
+    </div>
+  </section>
+
+  <!-- ============ LIVE ============ -->
+  <section id="view-live" class="view" hidden>
+    <div class="row">
+      <section class="panel grow" id="timerPanel">
+        <span class="label" id="timeLabel">Tubes dark</span>
+        <div class="nixie" id="nixie" role="img" aria-label="Timer hidden"></div>
+        <div id="timeDetail" hidden>
+          <div class="rail"><div class="rail-fill" id="railFill"></div></div>
+          <div class="rail-text"><span id="elapsedTxt"></span><span id="endsTxt"></span></div>
+        </div>
+        <p class="hint big" id="darkNote">The tubes stay dark so you're not watching the clock. A chime marks the break.</p>
+        <p class="status" id="statusLine"></p>
+        <div class="actions">
+          <button id="peekBtn" class="btn primary" type="button">Peek for 5 s</button>
+          <button id="pinTimeBtn" class="btn ghost" type="button" aria-pressed="false">Always show timer</button>
+          <button id="endBtn" class="btn ghost danger" type="button">End early</button>
+        </div>
+      </section>
+      <section class="panel side center">
+        <div class="porthole xl rivets"><canvas id="petLive" width="160" height="160" aria-hidden="true"></canvas></div>
+        <p class="label lg" id="petMood"></p>
+      </section>
+    </div>
+
+    <div class="row">
+      <section class="panel side center">
+        <span class="label sm">Focus pressure</span>
+        <div id="gauge"></div>
+        <span class="hint" id="gaugeNote">Revealed when the session ends</span>
+        <button id="pinScoreBtn" class="btn ghost sm" type="button" aria-pressed="false">Always show score</button>
+      </section>
+      <section class="panel grow">
+        <span class="label sm">Ship's log</span>
+        <ol class="log" id="log"></ol>
+      </section>
+    </div>
+
+    <section class="panel circle" id="circlePanel">
+      <div class="circle-head">
+        <span class="label sm">Study circle</span>
+        <span class="multiplier" id="multiplier">1× XP</span>
+        <span class="hint" id="circleNote"></span>
+      </div>
+      <div class="circle-body">
+        <ul class="friends" id="friends"></ul>
+        <div class="xp">
+          <div class="rail-text"><span class="brass-hi" id="xpLevel"></span><span id="xpText"></span></div>
+          <div class="rail"><div class="rail-fill" id="xpFill"></div></div>
+          <span class="hint" id="xpSoFar"></span>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" id="ledgerPanel" hidden>
+      <div class="label-row">
+        <span class="label sm">The ledger, minute by minute</span>
+        <span class="legend">
+          <span><i class="sw focus"></i>Focused</span><span><i class="sw site"></i>Screen drift</span><span><i class="sw idle"></i>Idle</span>
+        </span>
+      </div>
+      <div class="ledger" id="ledger"></div>
+    </section>
+  </section>
+
+  <!-- ============ TIME CARD ============ -->
+  <section id="view-card" class="view" hidden>
+    <div class="row top">
+      <div class="card-col">
+        <div class="slot"><div class="slot-mouth"></div></div>
+        <div class="card-clip">
+          <article class="card print" id="timecard"></article>
+        </div>
+      </div>
+      <div class="grow stack">
+        <div>
+          <h1 class="display xl" id="verdict"></h1>
+          <p class="lede" id="verdictSub"></p>
+        </div>
+        <div class="row">
+          <section class="panel grow tight">
+            <div class="pet-verdict">
+              <div class="porthole md"><canvas id="petCard" width="96" height="96" aria-hidden="true"></canvas></div>
+              <div class="stack sm">
+                <p class="italic" id="petVerdict"></p>
+                <div class="rail-text mono"><span class="brass-hi" id="cardLevel"></span><span id="cardXp"></span></div>
+                <div class="rail"><div class="rail-fill" id="cardXpFill"></div></div>
+                <span class="hint" id="cardToNext"></span>
+              </div>
+            </div>
+          </section>
+          <section class="panel side tight">
+            <span class="label sm">The circle's cards</span>
+            <ul class="board" id="board"></ul>
+          </section>
+        </div>
+        <section class="panel tight">
+          <span class="label sm">Did you finish?</span>
+          <span class="goal" id="cardGoal"></span>
+          <div class="chips" id="finishChips"></div>
+          <span class="hint" id="finishNote">Your answer is saved with this time card.</span>
+        </section>
+        <section class="note">
+          <span class="label sm ink">A note for next time</span>
+          <p id="coachNote"></p>
+        </section>
+        <section class="panel next">
+          <div class="stack sm">
+            <span class="label sm verd">Up next</span>
+            <span class="goal" id="nextTitle"></span>
+            <span class="hint" id="nextSub"></span>
+          </div>
+          <div class="actions">
+            <button id="startBreakBtn" class="btn verd-btn" type="button">Start intermission</button>
+            <button id="skipBreakBtn" class="btn ghost" type="button">Skip to next session</button>
+          </div>
+        </section>
+      </div>
+    </div>
+  </section>
+</main>
+
+<aside class="demo" id="demo">
+  <button class="demo-toggle" id="demoToggle" type="button" aria-expanded="false">Demo controls</button>
+  <div class="demo-body" id="demoBody" hidden>
+    <p class="hint">For testing without the device or a window tracker. Keys work too.</p>
+    <button class="btn ghost sm" data-demo="site" type="button">Toggle YouTube drift (Y)</button>
+    <button class="btn ghost sm" data-demo="idle" type="button">Toggle idle (I)</button>
+    <button class="btn ghost sm" data-demo="friend" type="button">Toggle Dev drifting (F)</button>
+    <button class="btn ghost sm" data-demo="fast" type="button">Speed ×30 (S)</button>
+    <button class="btn ghost sm" data-demo="finish" type="button">Jump to end (E)</button>
+  </div>
+</aside>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="pet.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
