@@ -221,7 +221,8 @@
     if (s.drift && s.drift.kind === kind && s.drift.label === label) return;
     if (s.drift) endDrift();
     s.drift = { kind, label, since: elapsed() };
-    send({ t: 'drift', kind, label, active: true });
+    // Camera drifts stay on the dashboard: the device derives its own from the forwarded focus ticks.
+    if (kind !== 'camera') send({ t: 'drift', kind, label, active: true });
     renderLive();
   }
   function endDrift() {
@@ -234,7 +235,7 @@
       s.events.push({ kind: d.kind, label: d.label, at: d.since, len });
       addLog(d.since, (d.kind === 'idle' ? 'Went idle, no keyboard or mouse.' : d.kind === 'camera' ? 'The camera saw you: ' + d.label.toLowerCase() + '.' : 'Wandered to ' + d.label + '.') + ' Back after ' + mmss(len).replace(/^0/, '') + '.');
     }
-    send({ t: 'drift', active: false });
+    if (d.kind !== 'camera') send({ t: 'drift', active: false });
     renderLive();
   }
 
@@ -750,7 +751,7 @@ const HEART_SVG = '<svg viewBox="0 0 7 6" width="100%" height="100%" shape-rende
     });
 
     porthole.addEventListener('pointerleave', () => {
-      locationbareaveTimer = setTimeout(() => {
+      leaveTimer = setTimeout(() => {
         dist = 0;
         nextHeartAt = 150;
         S.isPetting = false;

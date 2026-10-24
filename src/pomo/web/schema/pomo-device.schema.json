@@ -74,7 +74,7 @@
       }
     },
     "drift": {
-      "description": "Laptop -> device. Starts or stops a drift. active:true with a label starts it; active:false ends it and clears the label. Drifts are screen (kind site), idle (kind idle), or sustained camera (kind camera); the device scores them identically, kind is for the frontend and defaults to site. A minute with 15+ seconds of drift is a drift minute.",
+      "description": "Laptop -> device. Starts or stops a drift. active:true with a label starts it; active:false ends it and clears the label. Drifts are screen (kind site) or idle (kind idle); the device scores them identically and treats any kind but idle as site. Camera drifts are never sent as drift messages: the device derives them from the forwarded focus ticks. A minute with 15+ seconds of drift is a drift minute.",
       "type": "object",
       "additionalProperties": false,
       "required": ["t", "active"],
@@ -84,9 +84,9 @@
         "label": {
           "type": "string",
           "maxLength": 16,
-          "description": "What drifted, e.g. 'YouTube', 'Idle', 'Camera'. Truncated to 15 chars on the device."
+          "description": "What drifted, e.g. 'YouTube', 'Idle'. Truncated to 15 chars on the device."
         },
-        "kind": { "enum": ["site", "idle", "camera"] }
+        "kind": { "enum": ["site", "idle"] }
       }
     },
     "focus": {

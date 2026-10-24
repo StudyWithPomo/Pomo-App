@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
 import threading
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -22,6 +23,12 @@ from websockets.asyncio.server import broadcast, serve
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
 HOST = "127.0.0.1"
+
+
+class _HTTPServer(ThreadingHTTPServer):
+    # On Windows SO_REUSEADDR lets a second server bind a port that's already in use,
+    # so a busy port would silently serve another app instead of raising.
+    allow_reuse_address = sys.platform != "win32"
 
 
 class _QuietHandler(SimpleHTTPRequestHandler):
@@ -56,7 +63,7 @@ class Hub:
         if self._error is not None:
             raise self._error
         handler = partial(_QuietHandler, directory=str(WEB_DIR))
-        self._httpd = ThreadingHTTPServer((HOST, self.http_port), handler)
+        self._httpd = _HTTPServer((HOST, self.http_port), handler)
         threading.Thread(target=self._httpd.serve_forever, daemon=True).start()
 
     def stop(self) -> None:
