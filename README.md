@@ -6,13 +6,21 @@ It was two repos (`Frontend-Pomo`, `ML-Server-Pomo`); now one Python process ser
 Frames from the webcam are processed in memory only, never saved or sent anywhere.
 The camera only runs while a study session is running.
 
-## Setup (Fedora)
+## Setup
+Windows (Python 3.10–3.12; mediapipe 0.10.21 has no 3.13 wheels):
+
+    py -3.11 -m venv .venv
+    .venv\Scripts\python -m pip install -e ".[dev]"
+
+Fedora:
+
     sudo dnf install uv
     uv venv --python 3.12
     uv pip install -e ".[dev]"
 
 ## Run
-    uv run python -m pomo
+    .venv\Scripts\python -m pomo     # Windows
+    uv run python -m pomo            # Fedora
 
 Then open **http://localhost:8000** in **Chrome or Edge** (Web Serial and Idle Detection are Chromium-only).
 
@@ -28,7 +36,7 @@ Begin a session on the dashboard and the camera starts; the first 5 s are calibr
 | `--camera 0` | Camera index. |
 | `--config path.yaml` | Override focus thresholds (see below). |
 
-Tests: `uv run pytest`
+Tests: `uv run pytest` (Windows: `.venv\Scripts\python -m pytest`)
 
 ## How the pieces fit
 
@@ -57,4 +65,5 @@ Plain HTML/CSS/JS in `src/pomo/web`, no build step. Feature list: `docs/FEATURES
 - Posture is a proxy: face size and vertical position vs baseline (no pose model).
 - EAR threshold 0.20 is a guess; tune it with `--preview` if your eyes read differently.
 - Window tracking is still a stub that always returns "neutral". Distracting sites come from the dashboard's own `DISTRACTING` list when a helper sends `{"t":"active"}`; `classify()` and `config/windows.yaml` are ready for a real `WindowSource`.
-- The camera reader uses V4L2, so it targets Linux.
+- The camera reader tries DirectShow then Media Foundation on Windows, AVFoundation on macOS, V4L2 on Linux.
+- If port 8000 is taken (e.g. by another local app), start with `--port 8001` and open that port instead.
