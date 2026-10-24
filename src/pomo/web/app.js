@@ -757,6 +757,10 @@ const HEART_SVG = '<svg viewBox="0 0 7 6" width="100%" height="100%" shape-rende
     document.querySelectorAll('[data-demo]').forEach((b) => b.addEventListener('click', () => demo(b.dataset.demo)));
     document.addEventListener('keydown', (e) => {
       if (e.target.closest('input')) return;
+      if (e.key.toLowerCase() === 'd' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        $('demo').hidden = !$('demo').hidden;
+        return;
+      }
       const map = { y: 'site', i: 'idle', f: 'friend', s: 'fast', e: 'finish' };
       if (map[e.key.toLowerCase()]) demo(map[e.key.toLowerCase()]);
       if (e.key === ' ' && S.view === 'live') { e.preventDefault(); peek(); }
