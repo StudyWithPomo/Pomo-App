@@ -133,11 +133,14 @@
       "properties": { "t": { "const": "peek" } }
     },
     "end_laptop": {
-      "description": "Laptop -> device. Ends the current study session early (the 'End early' button). Only works while studying; the device responds with an end_device message. Not yet honoured by the firmware — added for the update.",
+      "description": "Laptop -> device. Ends the current phase early. scope 'session' is the 'End early' button: it only works while studying and the device responds with an end_device message. scope 'break' is 'End break' / 'Skip break': it ends a break or long rest.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["t"],
-      "properties": { "t": { "const": "end" } }
+      "required": ["t", "scope"],
+      "properties": {
+        "t": { "const": "end" },
+        "scope": { "enum": ["session", "break"] }
+      }
     },
     "hello": {
       "description": "Device -> laptop. Sent once when the link task starts (coupling handshake). fw is the firmware version.",
@@ -183,7 +186,7 @@
       "description": "Device -> laptop. Current session state, once per second while study/break/long rest runs and once when returning to idle. The device owns the countdown; the dashboard follows it. left/total are the remaining and total seconds of the current phase (0 when idle).",
       "type": "object",
       "additionalProperties": false,
-      "required": ["t", "left", "total", "phase", "focus", "session", "drift", "drift_s", "mult", "xp", "level"],
+      "required": ["t", "left", "total", "phase", "focus", "session", "drift", "drift_kind", "drift_s", "mult", "xp", "level"],
       "properties": {
         "t": { "const": "state" },
         "left": { "type": "integer", "minimum": 0 },
@@ -198,6 +201,10 @@
           "type": "string",
           "maxLength": 15,
           "description": "Active drift label, '' when none."
+        },
+        "drift_kind": {
+          "enum": ["site", "idle", "camera", ""],
+          "description": "Kind of the active drift, '' when none."
         },
         "drift_s": { "type": "integer", "minimum": 0, "description": "Seconds the current drift has been active." },
         "mult": {

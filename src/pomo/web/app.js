@@ -233,7 +233,7 @@
     if (s.drift && s.drift.kind === kind && s.drift.label === label) return;
     if (s.drift) endDrift();
     s.drift = { kind, label, since: elapsed() };
-    send({ t: 'drift', active: true, label: String(label).slice(0, 15), kind });
+    if (kind !== 'camera') send({ t: 'drift', active: true, label: String(label).slice(0, 15), kind }); // the device derives camera drifts from the focus ticks
     renderLive();
   }
   function endDrift() {
@@ -246,7 +246,7 @@
       s.events.push({ kind: d.kind, label: d.label, at: d.since, len });
       addLog(d.since, (d.kind === 'idle' ? 'Went idle, no keyboard or mouse.' : d.kind === 'camera' ? 'The camera saw you: ' + d.label.toLowerCase() + '.' : 'Wandered to ' + d.label + '.') + ' Back after ' + mmss(len).replace(/^0/, '') + '.');
     }
-    send({ t: 'drift', active: false });
+    if (d.kind !== 'camera') send({ t: 'drift', active: false });
     renderLive();
   }
 
@@ -670,7 +670,7 @@
     drift: { req: ['active'], keys: ['active', 'label', 'kind'] },
     focus: { req: ['ts', 'focus', 'state', 'reason'], keys: ['ts', 'focus', 'state', 'reason', 'window', 'yaw', 'pitch', 'ear'] },
     peek: { req: [], keys: [] },
-    end: { req: [], keys: [] }
+    end: { req: ['scope'], keys: ['scope'] }
   };
   const FOCUS_STATES = ['calibrating', 'focused', 'drifting', 'unfocused'];
   const FOCUS_REASONS = ['absent', 'drowsy', 'looking_away', 'slouching', 'bad_window'];
@@ -703,10 +703,10 @@
   }
   // "End early" with a device coupled: ask it to end; its 'end' message builds the time card.
   function requestDeviceEnd() {
-    send({ t: 'end' });
+    send({ t: 'end', scope: 'session' });
     clearTimeout(requestDeviceEnd.t);
     requestDeviceEnd.t = setTimeout(() => {
-      if (S.session && S.session.mode === 'focus') toast('The device has not confirmed yet. Hold its knob to end the session there.');
+      if (S.session && S.session.mode === 'focus') toast('The device has not confirmed yet. End it on the device.');
     }, 3000);
   }
   // The device reports a running XP total; the dashboard shows XP within the level.
@@ -895,10 +895,13 @@ const HEART_SVG = '<svg viewBox="0 0 7 6" width="100%" height="100%" shape-rende
     $('pinScoreBtn').addEventListener('click', () => { S.settings.pinScore = !S.settings.pinScore; save(); renderLive(); });
     $('endBtn').addEventListener('click', () => {
       if (!S.session) return;
-      if (S.session.mode === 'focus') endSession(true); else { S.session = null; show('setup'); renderSetup(); }
+      if (S.session.mode === 'focus') endSession(true); else { send({ t: 'end', scope: 'break' }); S.session = null; show('setup'); renderSetup(); }
     });
     $('startBreakBtn').addEventListener('click', () => { const c = S.lastCard; startBreak(c && c.no === SESSIONS_PER_SET ? LONG_BREAK : (c ? c.brk : S.settings.brk), c && c.no === SESSIONS_PER_SET); });
-    $('skipBreakBtn').addEventListener('click', () => { show('setup'); renderSetup(); });
+    $('skipBreakBtn').addEventListener('click', () => {
+      if (S.device.connected) { send({ t: 'end', scope: 'break' }); if (S.session && S.session.mode === 'break') S.session = null; }
+      show('setup'); renderSetup();
+    });
     $('demoToggle').addEventListener('click', () => {
       const open = $('demoBody').hidden;
       $('demoBody').hidden = !open;
