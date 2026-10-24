@@ -95,6 +95,7 @@
     <div class="row">
       <section class="panel grow" id="timerPanel">
         <span class="label" id="timeLabel">Tubes dark</span>
+        <span class="test-tag" id="testTag" hidden>Test timing</span>
         <div class="nixie" id="nixie" role="img" aria-label="Timer hidden"></div>
         <div id="timeDetail" hidden>
           <div class="rail"><div class="rail-fill" id="railFill"></div></div>
@@ -223,6 +224,18 @@
     </div>
   </section>
 </main>
+
+<div class="ready-veil" id="ready" role="alertdialog" aria-labelledby="readyTitle" aria-hidden="true">
+  <div class="link-card">
+    <div class="porthole md"><canvas id="petReady" width="96" height="96" aria-hidden="true"></canvas></div>
+    <h2 class="display sm" id="readyTitle"></h2>
+    <p>The intermission is over. Begin the next session, or finish for now.</p>
+    <div class="actions">
+      <button id="readyNextBtn" class="btn primary" type="button">Start next</button>
+      <button id="readyFinishBtn" class="btn ghost" type="button">Finish for now</button>
+    </div>
+  </div>
+</div>
 
 <aside class="demo" id="demo" hidden>
   <button class="demo-toggle" id="demoToggle" type="button" aria-expanded="false">Demo controls</button>

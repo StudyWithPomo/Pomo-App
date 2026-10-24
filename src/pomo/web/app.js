@@ -37,6 +37,9 @@
     lost: null, // set while the link dropped mid-session: { info }; the session is frozen, not ended
     paused: false, // the device's own 'paused' flag from its latest state
     recon: null, // after a reconnect, the timer that waits for the device's first state
+    readyDismissed: false, // the person answered the 'ready' panel; hide it until the device leaves ready
+    wasReady: false,
+    testTiming: false, // the device's last start said test:true (30 s phases)
     armed: false, // a state has arrived since the (re)connect, so silence can now mean loss
     toastOnResume: false, // announce 'Session resumed' once the device stops reporting paused
     lastRx: 0, // when the last device line arrived
@@ -325,7 +328,7 @@
     S.lastCard = {
       no: S.sessionNo, goal: s.goal, startedAt: s.startedAt, endedAt: new Date(), early: m ? m.early : early,
       total: s.total, done, focusedSec, pct, focusedMin, mult, earned, penalty,
-      heartDelta, leveled, before, events: s.events.slice(), minutes: minuteKinds(s, true), brk: s.brk, finished: null
+      heartDelta, leveled, before, test: !!(m && S.testTiming), events: s.events.slice(), minutes: minuteKinds(s, true), brk: s.brk, finished: null
     };
     S.session = null;
     S.sessionNo = S.sessionNo % SESSIONS_PER_SET + 1;
@@ -368,6 +371,7 @@
     const done = elapsed();
     const pct = s.mode === 'focus' && done ? Math.round((s.focusedSec / done) * 100) : 100;
 
+    $('testTag').hidden = !(S.device.connected && S.testTiming);
     $('nixie').classList.toggle('break', brk);
     setNixie(s.left, showTime);
     $('timeLabel').textContent = brk ? (s.long ? 'Long rest' : 'Intermission') + ' · time remaining' :
@@ -476,7 +480,7 @@
     const xpLine = c.penalty ? '<div class="line"><span>UNDER ' + PENALTY_BELOW + '% · PENALTY</span><b>−' + c.penalty + '</b></div>' :
       '<div class="line"><span>XP ' + c.focusedMin + ' MIN × ' + c.mult + (c.mult > 1 ? ' CIRCLE' : '') + '</span><b>' + c.earned + '</b></div>';
     $('timecard').innerHTML =
-      '<div class="line"><h2>Time Card</h2><span>No. ' + String(c.no + 1000).slice(1) + '</span></div>' +
+      '<div class="line"><h2>Time Card</h2><span>No. ' + String(c.no + 1000).slice(1) + '</span></div>' + (c.test ? '<div class="line"><span class="test-tag">Test timing</span></div>' : '') +
       '<div class="line rule solid" style="border-bottom:2px solid var(--ink);padding:8px 0"><span>IN&nbsp; ' + clock(c.startedAt) + '</span><span>OUT ' + clock(c.endedAt) + '</span><span>' + c.startedAt.toLocaleDateString([], { weekday: 'short', month: 'numeric', day: 'numeric' }).toUpperCase() + '</span></div>' +
       '<div class="line"><span>TASK</span><span style="text-align:right">' + esc(c.goal.toUpperCase()) + '</span></div>' +
       '<div><b>MINUTES PUNCHED</b><div class="punches" style="margin-top:6px">' + rows.join('') + '</div>' +
@@ -730,6 +734,22 @@
   // No line from the device for 6 s while a device session runs. An idle device sends nothing,
   // so this is armed only by a state after the (re)connect, and only while that state says a session is on.
   const BUSY_PHASES = ['study', 'break', 'long_rest', 'ready'];
+  // The device waits between sessions: "Ready for session N of IV?" over whichever view is open.
+  function renderReady() {
+    const on = !!(S.device.connected && !linkDown() && S.dev && S.dev.phase === 'ready' && !S.readyDismissed);
+    const box = $('ready');
+    const key = on ? String(S.dev.session) : '';
+    if (box.dataset.key === key) return;
+    box.dataset.key = key;
+    box.classList.toggle('show', on);
+    box.setAttribute('aria-hidden', String(!on));
+    document.querySelector('main').inert = on;
+    if (!on) return;
+    const next = Math.min(SESSIONS_PER_SET, S.dev.session + 1); // state.session is the one that just finished
+    $('readyTitle').textContent = 'Ready for session ' + (ROMAN[next - 1] || next) + ' of IV?';
+    StudyPet.drawPet($('petReady'), petOpts(currentMood()));
+    $('readyNextBtn').focus();
+  }
   function linkWatch() {
     if (S.armed && S.dev && BUSY_PHASES.includes(S.dev.phase) && deviceSessionRunning() && Date.now() - S.lastRx > 6000) linkLost();
   }
@@ -916,6 +936,9 @@
   }
   function onDeviceStart(m) {
     S.sessionNo = m.session;
+    S.testTiming = m.test === true;
+    if (S.dev && S.dev.phase === 'ready') S.readyDismissed = true; // started from the device: follow it
+    renderReady();
     const s = S.session;
     if (s && s.mode === 'focus') {
       s.study = m.study; s.brk = m.brk;
@@ -929,6 +952,11 @@
     S.dev = m;
     S.paused = m.paused === true;
     S.armed = true;
+    const nowReady = m.phase === 'ready';
+    if (nowReady && !S.wasReady) chime(); // once, when ready begins
+    S.wasReady = nowReady;
+    if (!nowReady) S.readyDismissed = false;
+    if (m.phase === 'idle') { S.testTiming = false; S.sessionNo = 1; } // the firmware's goIdle resets the set
     applyDeviceProgress(m.xp, m.level);
     if (S.recon && m.phase === 'idle') { endLostSession(false); return; } // it restarted: nothing to resume
     if (S.recon) settleReconnect(); else maybeResumed();
@@ -943,11 +971,14 @@
     } else if (m.phase === 'break' || m.phase === 'long_rest') {
       if (!s) S.session = { mode: 'break', total: m.total, left: m.left, long: m.phase === 'long_rest' };
       else if (s.mode === 'break') { s.total = m.total; s.left = m.left; s.long = m.phase === 'long_rest'; s.local = false; }
+    } else if (nowReady) { // the break ran out: no timer runs, the ready panel takes over
+      if (s && s.mode === 'break' && !s.local) { S.session = null; if (S.view === 'live') { show('setup'); renderSetup(); } }
     } else if (m.phase === 'idle' && s && s.mode === 'break' && !s.local) { // idle again: the break is over
       S.session = null;
       if (S.view === 'live') { chime(); toast('Intermission over. Ready for the next session?'); show('setup'); renderSetup(); }
     }
     if (S.view === 'live') renderLive();
+    renderReady();
   }
   function onDeviceEnd(m) {
     clearTimeout(requestDeviceEnd.t);
@@ -986,18 +1017,38 @@
     clearTimeout(peek.t);
     peek.t = setTimeout(() => { if (S.view === 'live') renderLive(); }, 5050);
   }
+  // One shared AudioContext. Chrome keeps a new one suspended without a recent user gesture, so it is
+  // created and resumed on the first pointerdown/keydown and reused for every chime.
+  let audio = null;
+  function getAudio() {
+    if (!audio) { try { audio = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { /* no audio */ } }
+    return audio;
+  }
+  function unlockAudio() {
+    const ac = getAudio();
+    if (!ac) return;
+    if (ac.state === 'suspended') ac.resume().catch(() => {});
+    if (ac.state !== 'suspended') {
+      document.removeEventListener('pointerdown', unlockAudio, true);
+      document.removeEventListener('keydown', unlockAudio, true);
+    }
+  }
   function chime() {
-    try {
-      const ac = new (window.AudioContext || window.webkitAudioContext)();
+    const ac = getAudio();
+    if (!ac) return;
+    const play = () => {
+      if (ac.state !== 'running') return; // still blocked: stay silent rather than chime late
+      const t0 = ac.currentTime;
       [660, 880].forEach((f, i) => {
         const o = ac.createOscillator(); const g = ac.createGain();
         o.frequency.value = f; o.type = 'sine';
-        g.gain.setValueAtTime(0.0001, ac.currentTime + i * 0.18);
-        g.gain.exponentialRampToValueAtTime(0.2, ac.currentTime + i * 0.18 + 0.02);
-        g.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + i * 0.18 + 0.5);
-        o.connect(g).connect(ac.destination); o.start(ac.currentTime + i * 0.18); o.stop(ac.currentTime + i * 0.18 + 0.55);
+        g.gain.setValueAtTime(0.0001, t0 + i * 0.18);
+        g.gain.exponentialRampToValueAtTime(0.2, t0 + i * 0.18 + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + i * 0.18 + 0.5);
+        o.connect(g).connect(ac.destination); o.start(t0 + i * 0.18); o.stop(t0 + i * 0.18 + 0.55);
       });
-    } catch (e) { /* audio blocked */ }
+    };
+    if (ac.state === 'suspended') ac.resume().then(play, () => {}); else play();
   }
 
   function demo(action) {
@@ -1106,6 +1157,8 @@ const HEART_SVG = '<svg viewBox="0 0 7 6" width="100%" height="100%" shape-rende
       $('demoToggle').setAttribute('aria-expanded', String(open));
     });
     document.querySelectorAll('[data-demo]').forEach((b) => b.addEventListener('click', () => demo(b.dataset.demo)));
+    document.addEventListener('pointerdown', unlockAudio, true);
+    document.addEventListener('keydown', unlockAudio, true);
     document.addEventListener('keydown', (e) => {
       if (e.target.closest('input')) return;
       if (e.key.toLowerCase() === 'd' && !e.ctrlKey && !e.metaKey && !e.altKey) {
@@ -1120,7 +1173,17 @@ const HEART_SVG = '<svg viewBox="0 0 7 6" width="100%" height="100%" shape-rende
     show('setup');
     renderSetup();
     connectHelper();
-    setInterval(() => { tick(); linkWatch(); }, 1000);
+    setInterval(() => { tick(); linkWatch(); renderReady(); }, 1000);
+    $('readyNextBtn').addEventListener('click', () => { S.readyDismissed = true; send({ t: 'end', scope: 'break' }); renderReady(); });
+    $('readyFinishBtn').addEventListener('click', () => {
+      S.readyDismissed = true;
+      send({ t: 'end', scope: 'session' });
+      S.sessionNo = 1; // finishing ends the set
+      S.session = null;
+      show('setup');
+      renderSetup();
+      renderReady();
+    });
     setInterval(() => { if (S.device.connected) send({ t: 'ping' }); }, 2000);
     $('reconnectBtn').addEventListener('click', () => reconnectDevice(true));
     $('leaveBtn').addEventListener('click', leaveLostSession);
