@@ -1,9 +1,21 @@
 """Webcam capture. Frames stay in memory; nothing is ever written to disk."""
 from __future__ import annotations
 
+import sys
 import time
 
 import cv2
+
+
+def _backends() -> list[int]:
+    """Camera backends to try, best first, for this OS. CAP_ANY is the last resort."""
+    if sys.platform.startswith("win"):
+        # DirectShow opens fastest and honours width/height/fps on most laptop webcams;
+        # Media Foundation is the newer Windows API and catches cameras DirectShow misses.
+        return [cv2.CAP_DSHOW, cv2.CAP_MSMF, cv2.CAP_ANY]
+    if sys.platform == "darwin":
+        return [cv2.CAP_AVFOUNDATION, cv2.CAP_ANY]
+    return [cv2.CAP_V4L2, cv2.CAP_ANY]
 
 
 class Webcam:
@@ -17,12 +29,19 @@ class Webcam:
         self._cap: cv2.VideoCapture | None = None
 
     def __enter__(self) -> "Webcam":
-        cap = cv2.VideoCapture(self._index, cv2.CAP_V4L2)
-        if not cap.isOpened():
+        cap = None
+        for backend in _backends():
+            cap = cv2.VideoCapture(self._index, backend)
+            if cap.isOpened():
+                break
             cap.release()
+            cap = None
+        if cap is None:
+            where = f"/dev/video{self._index}" if sys.platform.startswith("linux") else f"index {self._index}"
             raise RuntimeError(
-                f"Could not open camera {self._index} (/dev/video{self._index}). "
-                "Is another app using it?"
+                f"Could not open camera {self._index} ({where}). "
+                "Is another app (Zoom, Teams, the Camera app) using it? "
+                "On Windows, also check Settings > Privacy & security > Camera."
             )
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, self._width)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self._height)
