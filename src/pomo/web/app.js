@@ -217,12 +217,16 @@
   }
 
   function startBreak(minutes, long) {
-    // With a device coupled it already runs the break; its state messages drive the countdown.
-    if (!(S.device.connected && S.session && S.session.mode === 'break')) {
-      S.session = { mode: 'break', total: minutes * 60, left: minutes * 60, long: !!long };
+    // The device drives the break only while its latest state says it is on one; otherwise count down here.
+    if (!(deviceBreak() && S.session && S.session.mode === 'break' && !S.session.local)) {
+      S.session = { mode: 'break', total: minutes * 60, left: minutes * 60, long: !!long, local: !deviceBreak() };
     }
     show('live');
     renderLive();
+  }
+
+  function deviceBreak() {
+    return !!(S.device.connected && S.dev && (S.dev.phase === 'break' || S.dev.phase === 'long_rest'));
   }
 
   function elapsed() { return S.session ? S.session.total - S.session.left : 0; }
@@ -259,7 +263,7 @@
   function tick() {
     const s = S.session;
     if (!s) return;
-    if (S.device.connected) { if (S.view === 'live') renderLive(); return; } // the device owns the countdown
+    if (S.device.connected && (s.mode === 'focus' || !s.local)) { if (S.view === 'live') renderLive(); return; } // the device owns the countdown
     for (let i = 0; i < S.speed && s.left > 0; i++) {
       if (s.mode === 'focus') {
         const idx = s.total - s.left;
@@ -508,7 +512,16 @@
     renderFinish();
     $('coachNote').textContent = coach(c, worst);
 
+    // No break after End early (matches the firmware), with or without a device.
+    const noBreak = c.early;
+    $('startBreakBtn').hidden = noBreak;
+    $('skipBreakBtn').textContent = noBreak ? 'Begin next session' : 'Skip to next session';
     const long = c.no === SESSIONS_PER_SET;
+    if (noBreak) {
+      $('nextTitle').textContent = 'Session ' + ROMAN[S.sessionNo - 1] + ' of IV';
+      $('nextSub').textContent = 'You ended early, so there is no intermission.';
+      return;
+    }
     $('nextTitle').textContent = long ? 'Long rest · ' + LONG_BREAK + ' minutes' : 'Intermission · ' + c.brk + ' minutes';
     $('nextSub').textContent = long ? 'You finished a full set of four. Step away properly.' : 'Then session ' + ROMAN[S.sessionNo - 1] + ' of IV.' + (S.sessionNo === SESSIONS_PER_SET ? ' After that, a long rest.' : '');
   }
@@ -748,8 +761,8 @@
       accrue(s);
     } else if (m.phase === 'break' || m.phase === 'long_rest') {
       if (!s) S.session = { mode: 'break', total: m.total, left: m.left, long: m.phase === 'long_rest' };
-      else if (s.mode === 'break') { s.total = m.total; s.left = m.left; s.long = m.phase === 'long_rest'; }
-    } else if (s && s.mode === 'break') { // idle again: the break is over
+      else if (s.mode === 'break') { s.total = m.total; s.left = m.left; s.long = m.phase === 'long_rest'; s.local = false; }
+    } else if (s && s.mode === 'break' && !s.local) { // idle again: the break is over
       S.session = null;
       if (S.view === 'live') { chime(); toast('Intermission over. Ready for the next session?'); show('setup'); renderSetup(); }
     }
@@ -870,7 +883,7 @@ const HEART_SVG = '<svg viewBox="0 0 7 6" width="100%" height="100%" shape-rende
     });
 
     porthole.addEventListener('pointerleave', () => {
-      locationbareaveTimer = setTimeout(() => {
+      leaveTimer = setTimeout(() => {
         dist = 0;
         nextHeartAt = 150;
         S.isPetting = false;
@@ -895,11 +908,12 @@ const HEART_SVG = '<svg viewBox="0 0 7 6" width="100%" height="100%" shape-rende
     $('pinScoreBtn').addEventListener('click', () => { S.settings.pinScore = !S.settings.pinScore; save(); renderLive(); });
     $('endBtn').addEventListener('click', () => {
       if (!S.session) return;
-      if (S.session.mode === 'focus') endSession(true); else { send({ t: 'end', scope: 'break' }); S.session = null; show('setup'); renderSetup(); }
+      if (S.session.mode === 'focus') endSession(true); else { if (deviceBreak()) send({ t: 'end', scope: 'break' }); S.session = null; show('setup'); renderSetup(); }
     });
     $('startBreakBtn').addEventListener('click', () => { const c = S.lastCard; startBreak(c && c.no === SESSIONS_PER_SET ? LONG_BREAK : (c ? c.brk : S.settings.brk), c && c.no === SESSIONS_PER_SET); });
     $('skipBreakBtn').addEventListener('click', () => {
-      if (S.device.connected) { send({ t: 'end', scope: 'break' }); if (S.session && S.session.mode === 'break') S.session = null; }
+      if (deviceBreak()) send({ t: 'end', scope: 'break' });
+      if (S.session && S.session.mode === 'break') S.session = null;
       show('setup'); renderSetup();
     });
     $('demoToggle').addEventListener('click', () => {
