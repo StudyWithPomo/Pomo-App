@@ -1025,6 +1025,12 @@
     for (const el of $('view-live').children) if (el !== box) el.inert = down;
     if (!down) return;
     $('linkLostTitle').textContent = petName() + ' lost the device';
+    // Over Bluetooth the board stays powered and keeps timing; over USB (no battery) it usually lost power
+    if (S.lost) {
+      $('linkLostSub').textContent = S.lost.info.bluetoothServiceClassId != null
+        ? 'Pomo is still keeping time. Plug it back in or reconnect Bluetooth to see it.'
+        : "Pomo lost power or the cable came loose. Plug it back in; if it restarted, you'll start a fresh session.";
+    }
     $('linkLostTry').textContent = S.lost ? 'Looking for ' + petName() + '…' : '';
     $('reconnectBtn').hidden = !S.lost;
     $('leaveBtn').hidden = !S.lost;
