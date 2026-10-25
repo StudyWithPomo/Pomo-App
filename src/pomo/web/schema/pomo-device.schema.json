@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "pomo-device-protocol",
   "title": "Study Buddy: laptop <-> ESP32 device protocol",
-  "description": "JSON Lines, one JSON object per line, 115200 baud. Transport is USB serial now and Bluetooth SPP later; every outgoing line is written to all transports and every incoming line feeds one shared handler. Both ends ignore non-JSON lines, so debug prints on the same link are safe. The device assembler drops lines over 256 bytes.\n\nMessage directions: laptop -> device: config, start, drift, focus, peek, end, ping. Device -> laptop: hello, start, state, end, circle — the device reports only relevant session changes, never raw knob input. The two 'start' pairs and the two 'end' pairs share one t on opposite directions; they are distinguished by their fields (see defs).\n\nOwnership: the laptop is the source of truth for camera focus (PomoServer) and the session goal. The device is the source of truth for session state, XP, level and pet identity, so level/xp/hearts are never sent laptop -> device.",
+  "description": "JSON Lines, one JSON object per line, 115200 baud. Transport is USB serial now and Bluetooth SPP later; every outgoing line is written to all transports and every incoming line feeds one shared handler. Both ends ignore non-JSON lines, so debug prints on the same link are safe. The device assembler drops lines over 256 bytes.\n\nMessage directions: laptop -> device: config, start, drift, focus, peek, feed, end, ping. Device -> laptop: hello, start, state, end, circle — the device reports only relevant session changes, never raw knob input. The two 'start' pairs and the two 'end' pairs share one t on opposite directions; they are distinguished by their fields (see defs).\n\nOwnership: the laptop is the source of truth for camera focus (PomoServer) and the session goal. The device is the source of truth for session state, XP, level and pet identity, so level/xp/hearts are never sent laptop -> device. The same goes for the pet's gears and hunger: the laptop can ask the device to feed the pet (feed), and the device decides and reports the result.",
   "type": "object",
   "oneOf": [
     { "$ref": "#/$defs/config" },
@@ -10,6 +10,7 @@
     { "$ref": "#/$defs/drift" },
     { "$ref": "#/$defs/focus" },
     { "$ref": "#/$defs/peek" },
+    { "$ref": "#/$defs/feed" },
     { "$ref": "#/$defs/end_laptop" },
     { "$ref": "#/$defs/ping" },
     { "$ref": "#/$defs/hello" },
@@ -133,6 +134,13 @@
       "additionalProperties": false,
       "required": ["t"],
       "properties": { "t": { "const": "peek" } }
+    },
+    "feed": {
+      "description": "Laptop -> device. Feeds the pet one gear, exactly as the device's own Feed (knob press or the Playground's button): the same rules, so a gear is spent only if the device allows it. With the Playground on screen the device plays its toss and catch (or, when refused, a low hum); elsewhere it applies the feed with just the sound. The device answers with its pet message (event fed, empty or stuffed, and the new gears and hunger), the same as for a feed on the device. The laptop never sends counts. No fields. Spec: Firmware-Pomo docs/PET_PLAY_AND_CARE.md.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t"],
+      "properties": { "t": { "const": "feed" } }
     },
     "end_laptop": {
       "description": "Laptop -> device. Ends the current phase early. scope 'session' is the 'End early' button: it only works while studying and the device responds with an end_device message. scope 'break' is 'End break' / 'Skip break': it ends a break or long rest.",

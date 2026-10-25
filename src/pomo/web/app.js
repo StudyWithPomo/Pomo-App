@@ -1057,6 +1057,7 @@
     drift: { req: ['active'], keys: ['active', 'label', 'kind'] },
     focus: { req: ['ts', 'focus', 'state', 'reason'], keys: ['ts', 'focus', 'state', 'reason', 'window', 'yaw', 'pitch', 'ear'] },
     peek: { req: [], keys: [] },
+    feed: { req: [], keys: [] }, // the device decides and answers with a pet message
     end: { req: ['scope'], keys: ['scope'] },
     ping: { req: [], keys: [] }
   };
