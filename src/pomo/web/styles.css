@@ -349,19 +349,6 @@ main { max-width: 1200px; margin: 0 auto; padding: 28px 16px 96px; }
   .rail-fill, .tube .lit { transition: none; }
 }
 
-.pet-heart {
-  position: absolute;
-  width: 21px;
-  height: 18px;
-  pointer-events: none;
-  color: var(--copper-soft);
-  animation: heartFloat 1s ease-out forwards;
-}
-@keyframes heartFloat {
-  from { opacity: 1; transform: translateY(0); }
-  to { opacity: 0; transform: translateY(-40px); }
-}
-
 .pet-bubble {
   position: absolute;
   top: -12px;
@@ -377,7 +364,29 @@ main { max-width: 1200px; margin: 0 auto; padding: 28px 16px 96px; }
   z-index: 2;
 }
 
-.porthole { cursor: grab; }
+.porthole { cursor: grab; touch-action: none; }
+.porthole:active { cursor: grabbing; }
+/* Hearts and the tossed gear float above everything and finish even if the view changes
+   (Firmware-Pomo docs/PET_PLAY_AND_CARE.md, "Petting" and "Feeding") */
+.heart-fx { position: fixed; z-index: 50; width: 14px; height: 12px; color: var(--copper); pointer-events: none; }
+.gear-fx { position: fixed; z-index: 50; width: 21px; height: 21px; color: var(--brass-pale); pointer-events: none; }
+.heart-fx svg, .gear-fx svg { display: block; }
+
+/* ---------- Playground ---------- */
+.play { flex-direction: row; align-items: center; justify-content: center; gap: 64px; padding: 40px 48px; min-height: calc(100vh - 150px); } /* the same full plate as Home */
+.play-side { max-width: 560px; }
+.play .porthole.xl { width: 380px; height: 380px; border-width: 10px; } .play .porthole.xl canvas { width: 256px; height: 256px; } /* the pet's stage */
+.play-side { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 18px; }
+.play-speech { font-size: 28px; min-height: 1.4em; color: var(--text-soft); }
+.wind-gauge { max-width: 480px; }
+.rail.segs { height: 24px; max-width: none; display: flex; gap: 3px; }
+.rail.segs i { flex: 1; border: 1px solid var(--rim); }
+.rail.segs i.on { background: var(--brass); border-color: var(--brass); }
+@media (max-height: 820px) and (min-width: 900px) {
+  .play { padding: 28px 36px; gap: 52px; min-height: calc(100vh - 110px); }
+  .play .porthole.xl { width: 330px; height: 330px; } .play .porthole.xl canvas { width: 224px; height: 224px; }
+}
+@media (max-width: 760px) { .play { flex-direction: column; align-items: stretch; } .play .porthole.xl { align-self: center; } }
 /* ---------- Laptop height (e.g. 1366x768): keep the session's timer, pet and study circle in view ---------- */
 @media (max-height: 820px) and (min-width: 900px) {
   .topbar { padding: 12px 16px 10px; }
@@ -438,7 +447,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 28px 16px 96px; }
 
 /* ---------- Home: the instrument's front plate ---------- */
 /* Fills the screen under the top bar: the bottom padding that leaves room for the demo drawer isn't needed here */
-main:has(> #view-home:not([hidden])) { padding-bottom: 16px; }
+main:has(> #view-home:not([hidden])), main:has(> #view-play:not([hidden])) { padding-bottom: 16px; }
 .home { padding: 40px 44px; }
 .home.full { min-height: calc(100vh - 150px); justify-content: space-between; gap: 22px; padding: 30px 40px; }
 .home-top { flex: 1 1 auto; display: flex; align-items: center; gap: 48px; }

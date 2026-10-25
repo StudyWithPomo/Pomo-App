@@ -70,6 +70,7 @@
             </div>
             <div class="actions">
               <button id="homeStartBtn" class="btn primary" type="button">Start studying</button>
+            <button id="homePlayBtn" class="btn ghost" type="button">Play</button>
               <button id="homePetBtn" class="btn ghost" type="button">Customize pet</button>
             </div>
           </div>
@@ -79,6 +80,27 @@
       <div class="shelf" id="homeShelfWrap" hidden>
         <span class="label sm">Today's time cards</span>
         <div class="shelf-row" id="homeShelf"></div>
+      </div>
+    </section>
+  </section>
+
+  <!-- ============ PLAYGROUND ============ -->
+  <section id="view-play" class="view" hidden>
+    <section class="panel play">
+      <div class="porthole xl rivets"><canvas id="petPlay" width="160" height="160" aria-hidden="true"></canvas></div>
+      <div class="play-side">
+        <h1 class="display sm">Playground</h1>
+        <p class="italic play-speech" id="playSpeech" aria-live="polite"></p>
+        <div class="wind-gauge">
+          <div class="rail-text"><span class="label sm">Wound up</span><span id="windCount"></span></div>
+          <div class="rail segs" id="windGauge" role="meter" aria-label="Wound up" aria-valuemin="0" aria-valuemax="12" aria-valuenow="0"></div>
+        </div>
+        <div class="actions">
+          <button id="windBtn" class="btn primary" type="button">Wind</button>
+          <button id="feedBtn" class="btn ghost" type="button">Feed a gear</button>
+          <button id="playBackBtn" class="btn ghost" type="button">Back</button>
+        </div>
+        <p class="hint">Hold Wind, or press Up, Right or Space, to wind the key. Tap or stroke the pet.</p>
       </div>
     </section>
   </section>
