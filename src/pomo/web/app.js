@@ -45,6 +45,7 @@
     testTiming: false, // the device's last start said test:true (30 s phases)
     armed: false, // a state has arrived since the (re)connect, so silence can now mean loss
     toastOnResume: false, // announce 'Session resumed' once the device stops reporting paused
+    helloSeen: false, // a hello arrived while lost or reconnecting: the next state says whether it restarted
     lastRx: 0, // when the last device line arrived
     peekUntil: 0,
     speed: 1,
@@ -416,6 +417,7 @@
     if (!s || s.mode !== 'focus') return;
     if (S.device.connected && !m) { requestDeviceEnd(); return; }
     setCamera(false); // camera only runs during focus sessions
+    S.speed = 1; // the demo's ×30 never carries into the next session
     if (m) s.drift = null; // the session is already over on the device; nothing more to tell it
     if (s.drift) endDrift();
     chime();
@@ -490,7 +492,7 @@
     const done = elapsed();
     const pct = s.mode === 'focus' && done ? Math.round((s.focusedSec / done) * 100) : 100;
 
-    $('testTag').hidden = !(S.device.connected && S.testTiming);
+    $('testTag').hidden = !((S.device.connected && S.testTiming) || S.speed !== 1); // also flags the demo ×30 speed
     $('nixie').classList.toggle('break', brk);
     setNixie(s.left, showTime);
     $('timeLabel').textContent = brk ? (s.long ? 'Long rest' : 'Intermission') + ' · time remaining' :
@@ -967,10 +969,18 @@
       if (S.lost) scheduleRetry();
     }, 3000);
   }
+  // After a hello, a study state that doesn't continue our session (another session number, another
+  // length, or more time left than we last saw) means the device restarted and began a new one
+  function restartedSession(m) {
+    const s = S.session;
+    if (m.phase !== 'study' || !s || s.mode !== 'focus') return false;
+    return m.session !== S.sessionNo || m.total !== s.total || m.left > s.left;
+  }
   function settleReconnect() {
     if (!S.recon) return;
     clearTimeout(S.recon);
     S.recon = null;
+    S.helloSeen = false;
     maybeResumed();
     if (S.view === 'live') renderLive();
   }
@@ -982,7 +992,7 @@
   // The device restarted (USB power loss) so its session is gone: end the frozen one cleanly.
   // XP and level stay as the device reports them. forgetState: the last state we hold is stale.
   function endLostSession(forgetState) {
-    clearTimeout(S.recon); S.recon = null; S.toastOnResume = false;
+    clearTimeout(S.recon); S.recon = null; S.toastOnResume = false; S.helloSeen = false;
     clearTimeout(retryTimer);
     S.lost = null; S.paused = false;
     if (forgetState) S.dev = null;
@@ -995,7 +1005,7 @@
     toast(petName() + " restarted, so that session ended. Start a new one when you're ready.");
   }
   function leaveLostSession() {
-    clearTimeout(S.recon); S.recon = null; S.toastOnResume = false;
+    clearTimeout(S.recon); S.recon = null; S.toastOnResume = false; S.helloSeen = false;
     clearTimeout(retryTimer);
     S.lost = null; S.paused = false; S.dev = null;
     if (S.session && S.session.mode === 'focus') setCamera(false);
@@ -1108,6 +1118,8 @@
     if (m.phase === 'idle') { S.testTiming = false; S.sessionNo = 1; S.gone = []; } // the firmware's goIdle resets the set
     applyDeviceProgress(m.xp, m.level);
     if (S.recon && m.phase === 'idle') { endLostSession(false); return; } // it restarted: nothing to resume
+    if (S.recon && S.helloSeen && restartedSession(m)) { endLostSession(false); return; }
+    if (S.recon && S.helloSeen) S.toastOnResume = false; // same session still running: resume quietly
     if (S.recon) settleReconnect(); else maybeResumed();
     let s = S.session;
     if (m.phase === 'study') {
@@ -1153,7 +1165,9 @@
   function onDevice(m) {
     switch (m.t) {
       case 'hello':
-        if (S.lost || S.recon) { endLostSession(true); sendConfig(); break; } // a hello after a reconnect means it rebooted
+        // The firmware also says hello on every Bluetooth connect, with its session still running:
+        // the next state decides whether it really restarted (see onDeviceState)
+        if (S.lost || S.recon) { S.helloSeen = true; sendConfig(); break; }
         toast('Device says hello (firmware ' + (m.fw || '?') + ').'); sendConfig(); break;
       case 'start': onDeviceStart(m); break;
       case 'state': onDeviceState(m); break;
@@ -1218,7 +1232,7 @@
     if (linkDown()) { toast('The session is paused until the device is back.'); return; }
     if (action === 'friend' && !demoOn()) { toast('Open the demo drawer (D) to use the fake friends.'); return; }
     if (S.device.connected && (action === 'fast' || action === 'finish')) { toast('The device owns the clock while it is coupled.'); return; }
-    if (action === 'fast') { S.speed = S.speed === 1 ? 30 : 1; toast(S.speed === 1 ? 'Normal speed' : 'Speed ×30'); return; }
+    if (action === 'fast') { S.speed = S.speed === 1 ? 30 : 1; toast(S.speed === 1 ? 'Normal speed' : 'Speed ×30'); if (S.view === 'live') renderLive(); return; }
     if (action === 'friend') {
       const f = S.fake[1] || S.fake[0];
       if (f) { f.focused = !f.focused; toast(f.name + (f.focused ? ' is focused again' : ' is drifting')); }
