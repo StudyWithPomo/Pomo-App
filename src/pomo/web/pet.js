@@ -35,7 +35,9 @@
       annoyed: { line: [R(4, 6, 2), R(6, 7), R(10, 6, 2), R(9, 7), R(5, 8, 2), R(9, 8, 2), R(7, 10, 2), R(6, 11), R(9, 11)] },
       shh: { line: [R(4, 8, 3), R(9, 8, 3), R(7, 10, 2, 2)], cheek: [R(4, 10), R(11, 10)] },
       sleep: { line: [R(4, 8, 3), R(9, 8, 3), R(7, 10, 2)] },
-      sad: { line: [R(6, 6), R(5, 7), R(9, 6), R(10, 7), R(5, 8, 2), R(9, 8, 2), R(7, 10, 2), R(6, 11), R(9, 11)], hi: [R(4, 9)] }
+      sad: { line: [R(6, 6), R(5, 7), R(9, 6), R(10, 7), R(5, 8, 2), R(9, 8, 2), R(7, 10, 2), R(6, 11), R(9, 11)], hi: [R(4, 9)] },
+      // Worried brows, tired eyes, a small open mouth (Firmware-Pomo docs/PET_PLAY_AND_CARE.md, Part 2 "The new face: hungry")
+      hungry: { line: [R(5, 6), R(10, 6), R(5, 7, 2), R(9, 7, 2), R(7, 10, 2), R(6, 11), R(9, 11), R(7, 12, 2)] }
     },
     goggles: { shade: [R(3, 5, 2), R(7, 5, 2), R(11, 5, 2)], mono: [R(5, 4, 2, 2), R(9, 4, 2, 2)] },
     tie: { cheek: [R(5, 12, 2, 2), R(9, 12, 2, 2)], line: [R(7, 12, 2)] },

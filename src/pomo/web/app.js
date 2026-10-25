@@ -51,6 +51,7 @@
     speed: 1,
     idleDetector: null,
     lovedUntil: 0, // petted: the love face until then (ms)
+    care: null, // Milestone E gears and hunger: null until the device reports them (today's firmware never does)
     shhUntil: 0, // tapped during focus: the shh face until then
     play: { wound: 0, key: 0, shown: null, lastPlay: 0, lastRunDown: 0, dancing: false, danceAt: 0, gear: null, asleep: false, loveUntil: 0, line: '' }
   };
@@ -489,7 +490,7 @@
     const s = S.session;
     if (linkDown()) return 'sad';
     if (petted() && (!s || s.mode === 'break')) return 'love';
-    if (!s) return 'happy';
+    if (!s) return careMood() || 'happy';
     if (s.mode === 'break') return 'happy';
     if (hushed()) return 'shh';
     return s.drift ? 'annoyed' : 'focus';
@@ -890,6 +891,8 @@
       return;
     }
     S.dev = null;
+    S.care = null;
+    renderCare();
     S.circle = []; // back to the local engine; the demo drawer has the fake friends
     S.gone = [];
     setDeviceChip();
@@ -1135,6 +1138,7 @@
     S.dev = m;
     S.paused = m.paused === true;
     S.armed = true;
+    if (Number.isInteger(m.gears) || typeof m.hunger === 'string') updateCare({ gears: m.gears, hunger: m.hunger });
     const nowReady = m.phase === 'ready';
     if (nowReady && !S.wasReady) chime(); // once, when ready begins
     S.wasReady = nowReady;
@@ -1167,6 +1171,7 @@
   }
   function onDeviceEnd(m) {
     clearTimeout(requestDeviceEnd.t);
+    if (Number.isInteger(m.gears_total)) updateCare({ gears: m.gears_total });
     if (!S.session || S.session.mode !== 'focus') { // e.g. the page was reloaded mid-session
       const total = m.elapsed_min * 60;
       S.session = Object.assign(newFocusSession(Math.max(1, m.elapsed_min), S.settings.brk, S.settings.goal), { total, left: 0, startedAt: new Date(Date.now() - total * 1000), secs: new Array(total).fill(null) });
@@ -1199,8 +1204,66 @@
       case 'circle':
         if (Array.isArray(m.friends)) onCircle(m.friends);
         break;
+      case 'pet': onPet(m); break;
     }
   }
+  // ---------- Pet care (Milestone E, prepared) ----------
+  // Everything here stays off until the device sends gears or hunger (Firmware-Pomo docs/PET_PLAY_AND_CARE.md, Part 2).
+  const HUNGER = ['full', 'content', 'peckish', 'hungry'];
+  // Idle face by hunger: full -> love, hungry -> hungry, otherwise none (the caller's default)
+  function careMood() {
+    if (!S.care) return null;
+    if (S.care.hunger === 'full') return 'love';
+    if (S.care.hunger === 'hungry') return 'hungry';
+    return null;
+  }
+  function updateCare(part) {
+    const c = S.care || { gears: 0, max: 12, hunger: 'content', fedAt: 0 };
+    if (Number.isInteger(part.gears)) c.gears = Math.max(0, Math.min(c.max, part.gears));
+    if (Number.isInteger(part.max) && part.max > 0) c.max = part.max;
+    if (HUNGER.includes(part.hunger)) c.hunger = part.hunger;
+    if (Number.isInteger(part.fedAt)) c.fedAt = part.fedAt;
+    S.care = c;
+    // a pet sitting idle in the Playground says the line for its new hunger
+    const p = S.play;
+    if (S.view === 'play' && !p.dancing && !p.gear && !p.wound && !p.asleep && Object.values(IDLE_LINES).includes(p.line)) p.line = idleLine();
+    renderCare();
+    drawPets();
+    if (S.view === 'home') renderHome();
+  }
+  // The device's pet message; feed attempts made on the device show in the Playground
+  function onPet(m) {
+    const wasHungry = !!(S.care && S.care.hunger === 'hungry');
+    updateCare({ gears: m.gears, max: m.max_gears, hunger: m.hunger, fedAt: m.fed_at });
+    if (S.view !== 'play') return;
+    const p = S.play;
+    if (m.event === 'empty') p.line = 'Out of gears! Finish a session to earn some.';
+    else if (m.event === 'stuffed') p.line = "I'm stuffed! Save it for later.";
+    else if (m.event === 'fed') {
+      p.line = wasHungry ? "Oh, that's better!" : 'Crunchy! Thank you.';
+      p.loveUntil = Date.now() + AFTER_MS;
+      squish($('petPlay'));
+    } else return;
+    p.lastPlay = Date.now();
+    renderPlay();
+  }
+  // The gears bars on Home and the Playground: a small gear, then a pip per gear the bar holds
+  function renderCare() {
+    const c = S.care;
+    for (const id of ['homeGears', 'playGears']) {
+      const bar = $(id);
+      bar.hidden = !c;
+      if (!c) continue;
+      if (!bar.firstChild) bar.innerHTML = '<span class="gear-icon">' + GEAR_FRAMES[0] + '</span><span class="pips"></span>';
+      const pips = bar.lastChild;
+      if (pips.children.length !== c.max) pips.replaceChildren(...Array.from({ length: c.max }, () => document.createElement('i')));
+      [...pips.children].forEach((pip, i) => pip.classList.toggle('on', i < c.gears));
+      bar.setAttribute('role', 'img');
+      bar.setAttribute('aria-label', 'Gears: ' + c.gears + ' of ' + c.max);
+    }
+    $('feedBtn').classList.toggle('dim', !!(c && c.gears <= 0));
+  }
+
   // ---------- Home ----------
   // Today's time cards in this browser, kept as { day: 'YYYY-MM-DD', list } (dates as ISO strings)
   const todayKey = () => { const d = new Date(); return d.getFullYear() + '-' + two(d.getMonth() + 1) + '-' + two(d.getDate()); };
@@ -1332,6 +1395,7 @@
       const who = names.length === 1 ? names[0] : names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1];
       return who + (names.length === 1 ? ' is' : ' are') + ' nearby. Study together?';
     }
+    if (S.care && (S.care.hunger === 'hungry' || S.care.hunger === 'peckish')) return IDLE_LINES[S.care.hunger];
     const cards = todaysCards().reverse(); // newest first
     const proud = cards.find((c) => c.pct >= 80);
     if (proud) return 'That ' + proud.pct + '% session? Proud of you.';
@@ -1573,6 +1637,9 @@ const HEART_SVG = '<svg viewBox="0 0 7 6" width="100%" height="100%" shape-rende
   const WIND_FULL = 12, RUN_DOWN_AFTER = 3000, RUN_DOWN_EVERY = 600, DANCE_MS = 3000, AFTER_MS = 1500;
   const FLIGHT_MS = 650, SLEEP_AFTER = 20000, HOLD_DELAY = 400, HOLD_REPEAT = 150;
   const IDLE_LINE = 'Wind my key, or toss me a gear!';
+  // The Playground's idle line by hunger (Firmware-Pomo docs/PET_PLAY_AND_CARE.md, Part 2 "What the pet says")
+  const IDLE_LINES = { full: "I'm stuffed! Wind me up instead?", content: IDLE_LINE, peckish: 'A gear would be lovely...', hungry: "My tummy's ticking... got a gear?" };
+  const idleLine = () => (S.care && IDLE_LINES[S.care.hunger]) || IDLE_LINE;
   const gearSvg = (rects) => '<svg viewBox="0 0 7 7" width="21" height="21" shape-rendering="crispEdges" aria-hidden="true"><g fill="currentColor">' +
     rects.map(([x, y, w, h]) => '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '"/>').join('') + '</g></svg>';
   // The gear's two tumbling frames, 7x7 (Feeding)
@@ -1587,7 +1654,7 @@ const HEART_SVG = '<svg viewBox="0 0 7 6" width="100%" height="100%" shape-rende
     const p = S.play, now = Date.now();
     if (p.dancing || now < p.loveUntil || petted()) return 'love';
     if (p.asleep) return 'sleep';
-    return 'happy';
+    return careMood() || 'happy';
   }
   function renderPlay() {
     const p = S.play;
@@ -1619,7 +1686,7 @@ const HEART_SVG = '<svg viewBox="0 0 7 6" width="100%" height="100%" shape-rende
     const p = S.play;
     p.lastPlay = Date.now();
     p.asleep = false;
-    if (!p.wound && !p.dancing) p.line = IDLE_LINE;
+    if (!p.wound && !p.dancing) p.line = idleLine();
     show('play');
     renderPlay();
     playLoop();
@@ -1666,6 +1733,9 @@ const HEART_SVG = '<svg viewBox="0 0 7 6" width="100%" height="100%" shape-rende
     const p = S.play;
     if (S.view !== 'play' || p.dancing || p.gear) return;
     const woke = playNoted();
+    // With gears from the device, an empty bar means no toss
+    if (S.care && S.care.gears <= 0) { p.line = 'Out of gears! Finish a session to earn some.'; renderPlay(); return; }
+    p.hungryToss = !!(S.care && S.care.hunger === 'hungry');
     if (!woke) p.line = 'Ooh, a gear!';
     sound(SOUNDS.TOSS);
     const from = $('feedBtn').getBoundingClientRect(), pet = $('petPlay').getBoundingClientRect();
@@ -1685,7 +1755,8 @@ const HEART_SVG = '<svg viewBox="0 0 7 6" width="100%" height="100%" shape-rende
   function caught() {
     const p = S.play;
     squish($('petPlay'));
-    p.line = 'Crunchy! Thank you.';
+    p.line = p.hungryToss ? "Oh, that's better!" : 'Crunchy! Thank you.';
+    p.hungryToss = false;
     p.loveUntil = Date.now() + AFTER_MS;
     p.lastPlay = Date.now();
     sound(SOUNDS.CRUNCH);
@@ -1727,7 +1798,7 @@ const HEART_SVG = '<svg viewBox="0 0 7 6" width="100%" height="100%" shape-rende
           p.wound--;
           p.key = (p.key + 3) % 4;
           p.lastRunDown = now;
-          if (!p.wound) p.line = IDLE_LINE;
+          if (!p.wound) p.line = idleLine();
           renderPlay();
         }
         // 20 s with nobody playing, nothing wound and no gear in the air: asleep

@@ -372,6 +372,18 @@ main { max-width: 1200px; margin: 0 auto; padding: 28px 16px 96px; }
 .gear-fx { position: fixed; z-index: 50; width: 21px; height: 21px; color: var(--brass-pale); pointer-events: none; }
 .heart-fx svg, .gear-fx svg { display: block; }
 
+/* ---------- Gears bar (Milestone E; shown only once the device reports gears) ----------
+   A small gear, then 12 pips of 5x8 px with 1 px gaps: brass when held, a dark outline when empty
+   (Firmware-Pomo docs/PET_PLAY_AND_CARE.md, Part 2 "On screen") */
+.home, .play { position: relative; }
+.gears-bar { position: absolute; top: 16px; right: 20px; display: flex; align-items: center; gap: 8px; }
+.gears-bar .gear-icon { width: 14px; height: 14px; color: var(--brass); }
+.gears-bar .gear-icon svg { width: 14px; height: 14px; display: block; }
+.gears-bar .pips { display: flex; gap: 1px; }
+.gears-bar .pips i { width: 5px; height: 8px; box-sizing: border-box; border: 1px solid var(--rim); }
+.gears-bar .pips i.on { background: var(--brass); border-color: var(--brass); }
+.btn.dim { opacity: 0.55; }
+
 /* ---------- Playground ---------- */
 .play { flex-direction: row; align-items: center; justify-content: center; gap: 64px; padding: 40px 48px; min-height: calc(100vh - 150px); } /* the same full plate as Home */
 .play-side { max-width: 560px; }
