@@ -58,9 +58,17 @@
           <div class="chips" id="studyChips"></div>
         </div>
 
-        <div class="field">
-          <div class="label-row"><span class="label verd">Break</span><span class="hint" id="breakRule"></span></div>
-          <div class="chips" id="breakChips"></div>
+        <div class="study-break" id="studyBreak">
+          <div class="dial-box" id="customStudy" hidden>
+            <div class="dial" id="studyDial" role="slider" tabindex="0" aria-label="Study length in minutes"
+                 aria-describedby="dialHelp" aria-valuemin="15" aria-valuemax="90" aria-valuenow="25" aria-valuetext="25 minutes"></div>
+            <span class="sr" id="dialHelp">Turn the dial, scroll over it, or use the arrow keys. Steps of 5 minutes.</span>
+          </div>
+          <div class="field">
+            <div class="label-row"><span class="label verd">Break</span><span class="hint" id="breakRule"></span></div>
+            <div class="chips" id="breakChips"></div>
+            <span class="hint" id="longRest"></span>
+          </div>
         </div>
 
         <div class="actions">

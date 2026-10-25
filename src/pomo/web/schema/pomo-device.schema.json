@@ -55,7 +55,7 @@
       }
     },
     "start_laptop": {
-      "description": "Laptop -> device. Starts a study set when no phase is running. The device snaps study to 15/25/45/60 and clamps brk to the allowed range (15 -> 3..5, 25 -> 5..8, 45 -> 9..15, 60 -> 12..20). A start while a phase is running is ignored.",
+      "description": "Laptop -> device. Starts a study set when no phase is running. The device accepts study lengths of 15-90 min in steps of 5 and clamps brk to 1/5..1/3 of study (15 -> 3..5, 25 -> 5..8, 45 -> 9..15, 60 -> 12..20, and so on). A start while a phase is running is ignored.",
       "type": "object",
       "additionalProperties": false,
       "required": ["t", "study", "brk"],
@@ -63,9 +63,10 @@
         "t": { "const": "start" },
         "study": {
           "type": "integer",
-          "minimum": 1,
-          "maximum": 120,
-          "description": "Study minutes; snapped to the nearest of 15/25/45/60 on the device."
+          "minimum": 15,
+          "maximum": 90,
+          "multipleOf": 5,
+          "description": "Study minutes, 15-90 in steps of 5."
         },
         "brk": {
           "type": "integer",
@@ -167,7 +168,7 @@
       "required": ["t", "study", "brk", "session"],
       "properties": {
         "t": { "const": "start" },
-        "study": { "enum": [15, 25, 45, 60] },
+        "study": { "type": "integer", "minimum": 15, "maximum": 90, "multipleOf": 5 },
         "brk": { "type": "integer" },
         "session": { "type": "integer", "minimum": 1, "maximum": 4 },
         "test": {
@@ -222,6 +223,7 @@
           "description": "Kind of the active drift, '' when none."
         },
         "drift_s": { "type": "integer", "minimum": 0, "description": "Seconds the current drift has been active." },
+        "earned": { "type": "integer", "minimum": 0, "description": "Optional. Live XP earned so far in the running study session." },
         "mult": {
           "type": "integer",
           "minimum": 1,
