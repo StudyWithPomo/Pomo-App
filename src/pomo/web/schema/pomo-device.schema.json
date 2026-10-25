@@ -233,8 +233,8 @@
         },
         "drift_s": { "type": "integer", "minimum": 0, "description": "Seconds the current drift has been active." },
         "earned": { "type": "integer", "minimum": 0, "description": "Live XP earned so far in the running study session. Sent only while phase is study." },
-        "gears": { "type": "integer", "minimum": 0, "maximum": 12, "description": "Planned (Milestone E, not sent by firmware yet): gears held." },
-        "hunger": { "enum": ["full", "content", "peckish", "hungry"], "description": "Planned (Milestone E, not sent by firmware yet): the pet's hunger level." },
+        "gears": { "type": "integer", "minimum": 0, "maximum": 12, "description": "Milestone E: gears held." },
+        "hunger": { "enum": ["full", "content", "peckish", "hungry"], "description": "Milestone E: the pet's hunger level." },
         "mult": {
           "type": "integer",
           "minimum": 1,
@@ -267,13 +267,11 @@
         "early": {
           "type": "boolean",
           "description": "True when the session ended early (partial last minute not counted)."
-        },
-        "gears": { "type": "integer", "minimum": 0, "description": "Planned (Milestone E, not sent by firmware yet): gears earned by this session, after the cap." },
-        "gears_total": { "type": "integer", "minimum": 0, "maximum": 12, "description": "Planned (Milestone E, not sent by firmware yet): gears held afterwards." }
+        }
       }
     },
     "pet": {
-      "description": "Device -> laptop. Planned (Milestone E, not sent by firmware yet; Firmware-Pomo docs/PET_PLAY_AND_CARE.md, Part 2 'Protocol additions'). Sent on hello, whenever the gears or the hunger level change, and on every feed attempt.",
+      "description": "Device -> laptop. Milestone E (Firmware-Pomo docs/PET_PLAY_AND_CARE.md, Part 2 'Protocol additions'). Sent right after hello, whenever the hunger level changes, after every scored session that ran to the end (event earned), and on every feed attempt.",
       "type": "object",
       "additionalProperties": false,
       "required": ["t", "gears", "max_gears", "hunger", "fed_at", "event"],
@@ -283,7 +281,8 @@
         "max_gears": { "type": "integer", "minimum": 1, "description": "The cap (12)." },
         "hunger": { "enum": ["full", "content", "peckish", "hungry"] },
         "fed_at": { "type": "integer", "minimum": 0, "description": "Unix seconds, or 0 if never or unknown." },
-        "event": { "enum": ["hello", "earned", "fed", "empty", "stuffed", "hunger"], "description": "Why it was sent; hunger means the level changed." }
+        "event": { "enum": ["hello", "earned", "fed", "empty", "stuffed", "hunger"], "description": "Why it was sent; hunger means the level changed." },
+        "earned": { "type": "integer", "minimum": 0, "description": "Only with event earned: gears this session added after the cap (0 when the bar was full; the firmware leaves the field out then)." }
       }
     },
     "circle": {
