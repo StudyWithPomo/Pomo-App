@@ -185,6 +185,7 @@
         </div>
         <p class="hint big" id="darkNote">The tubes stay dark so you're not watching the clock. A chime marks the break.</p>
         <p class="status" id="statusLine"></p>
+        <p class="hint" id="pausedNote" hidden>Pomo paused your session. Reconnect to pick up where you left off.</p>
         <div class="actions">
           <button id="peekBtn" class="btn primary" type="button">Peek for 5 s</button>
           <button id="pinTimeBtn" class="btn ghost" type="button" aria-pressed="false">Always show timer</button>
@@ -239,7 +240,7 @@
       <div class="link-card">
         <div class="porthole md"><canvas id="petLost" width="96" height="96" aria-hidden="true"></canvas></div>
         <h2 class="display sm" id="linkLostTitle"></h2>
-        <p id="linkLostSub">Pomo is still keeping time. Plug it back in or reconnect Bluetooth to see it.</p>
+        <p id="linkLostSub">Pomo paused your session. Reconnect to pick up where you left off.</p>
         <p class="hint" id="linkLostTry"></p>
         <div class="actions">
           <button id="reconnectBtn" class="btn primary" type="button">Reconnect</button>

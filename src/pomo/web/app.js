@@ -510,6 +510,7 @@
   function renderLive() {
     const s = S.session;
     if (!s) return;
+    $('pausedNote').hidden = !(S.paused && S.device.connected); // the device reports it paused study: say so quietly
     const now = Date.now();
     const peeking = now < S.peekUntil;
     const showTime = s.mode === 'break' || S.settings.pinTime || peeking;
@@ -896,7 +897,7 @@
     const s = S.session;
     return !!(S.device.connected && s && (s.mode === 'focus' || !s.local));
   }
-  const linkDown = () => !!(S.lost || S.paused || S.recon);
+  const linkDown = () => !!(S.lost || S.recon);
   // The link dropped (the read loop ended, or the device went silent).
   function linkLost() {
     const dev = S.device;
@@ -1071,7 +1072,7 @@
     // Over Bluetooth the board stays powered and keeps timing; over USB (no battery) it usually lost power
     if (S.lost) {
       $('linkLostSub').textContent = S.lost.info.bluetoothServiceClassId != null
-        ? 'Pomo is still keeping time. Plug it back in or reconnect Bluetooth to see it.'
+        ? 'Pomo paused your session. Reconnect to pick up where you left off.' // the firmware pauses study after 6 s without the laptop
         : "Pomo lost power or the cable came loose. Plug it back in; if it restarted, you'll start a fresh session.";
     }
     $('linkLostTry').textContent = S.lost ? 'Looking for ' + petName() + '…' : '';
@@ -1552,6 +1553,19 @@
     if (!S.lookSync) { btn.hidden = false; btn.disabled = false; if (note.textContent === 'Saved here; syncs when Pomo connects.') note.textContent = ''; return; }
     btn.hidden = true;
     note.textContent = S.syncPending ? 'Syncing with Pomo…' : lookMatches() ? 'Synced with Pomo.' : 'Not synced yet. Change it again to retry.';
+  }
+
+  // The 2 s heartbeat ticks in a Web Worker, whose timers background tabs don't throttle the way
+  // they do the page's; if a Worker can't start, the page's own timer does it
+  function startPing() {
+    const ping = () => { if (S.device.connected) send({ t: 'ping' }); };
+    const fallback = () => { if (!startPing.timer) startPing.timer = setInterval(ping, 2000); };
+    try {
+      const src = URL.createObjectURL(new Blob(['setInterval(() => postMessage(0), 2000);'], { type: 'text/javascript' }));
+      const w = new Worker(src);
+      w.onmessage = ping;
+      w.onerror = () => { w.terminate(); fallback(); };
+    } catch (e) { fallback(); }
   }
 
   function setDeviceChip() {
@@ -2051,7 +2065,7 @@ const HEART_SVG = '<svg viewBox="0 0 7 6" width="100%" height="100%" shape-rende
       renderSetup();
       renderReady();
     });
-    setInterval(() => { if (S.device.connected) send({ t: 'ping' }); }, 2000);
+    startPing();
     $('reconnectBtn').addEventListener('click', () => reconnectDevice(true));
     $('leaveBtn').addEventListener('click', leaveLostSession);
     if ('serial' in navigator) navigator.serial.addEventListener('connect', () => reconnectDevice(false));
