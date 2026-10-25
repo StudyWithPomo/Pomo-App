@@ -27,7 +27,7 @@
   function demoCircle() { return [{ name: 'Ava', focused: true }, { name: 'Dev', focused: true }]; }
   const S = {
     view: 'setup',
-    settings: Object.assign({ user: 'Sidak', name: 'Mochi', body: 'bot', face: 'plain', color: 'brass', pinTime: false, pinScore: false, study: 25, brk: 5, custom: false, goal: '' }, store.get('settings', {})),
+    settings: Object.assign({ user: '', name: 'Mochi', body: 'bot', face: 'plain', color: 'brass', pinTime: false, pinScore: false, study: 25, brk: 5, custom: false, goal: '' }, store.get('settings', {})),
     progress: Object.assign({ level: 3, xp: 340, hearts: 3 }, store.get('progress', {})),
     sessionNo: 1,
     session: null,
@@ -1063,7 +1063,9 @@
     if (['bot', 'cat', 'dog'].includes(st.body)) pet.body = st.body;
     if (['plain', 'monocle'].includes(st.face)) pet.face = st.face;
     if (['brass', 'copper', 'pewter', 'verdigris'].includes(st.color)) pet.color = st.color;
-    send({ t: 'config', user: String(st.user || '').slice(0, 16), pet, time: Math.floor(Date.now() / 1000), tz: -new Date().getTimezoneOffset() });
+    // An empty name is left out, so it never wipes a name the device already has (friends then see the pet's)
+    const user = String(st.user || '').trim().slice(0, 16);
+    send(Object.assign({ t: 'config' }, user ? { user } : {}, { pet, time: Math.floor(Date.now() / 1000), tz: -new Date().getTimezoneOffset() }));
   }
   // The helper's tick carries exactly the schema's fields today; rebuild it anyway so nothing extra reaches the device.
   function focusMsg(m) {
@@ -1316,6 +1318,8 @@ const HEART_SVG = '<svg viewBox="0 0 7 6" width="100%" height="100%" shape-rende
     buildNixie();
     document.querySelectorAll('.porthole').forEach(wirePetting);
     $('goal').value = S.settings.goal || '';
+    $('userName').value = S.settings.user || '';
+    $('userName').addEventListener('input', (e) => { S.settings.user = e.target.value.slice(0, 16); petChanged(); });
     $('petName').value = S.settings.name;
     $('petName').addEventListener('input', (e) => { S.settings.name = e.target.value.slice(0, 10); petChanged(); });
     $('beginBtn').addEventListener('click', startSession);
