@@ -200,6 +200,8 @@ main { max-width: 1200px; margin: 0 auto; padding: 28px 16px 96px; }
 .friends li { display: flex; align-items: center; gap: 14px; border-top: 1px solid var(--rim); padding-top: 12px; font-size: 17px; }
 .friends .who { width: 72px; font-weight: 700; font-size: 19px; }
 .friends .lamp.off { background: var(--copper); box-shadow: none; }
+.friends li.gone { color: var(--muted); }
+.friends li.gone .who { font-weight: 400; }
 .xp { border-top: 1px solid var(--rim); padding-top: 14px; display: flex; flex-direction: column; gap: 8px; }
 .xp .rail-text { margin: 0; }
 

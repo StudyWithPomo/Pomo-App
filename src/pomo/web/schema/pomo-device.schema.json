@@ -145,14 +145,14 @@
       }
     },
     "ping": {
-      "description": "Laptop -> device. Heartbeat, sent every 2 s while the laptop is coupled. If the device hears nothing from the laptop for a while it pauses the running session (state.paused) until traffic resumes. No fields.",
+      "description": "Laptop -> device. Heartbeat, sent every 2 s while the laptop is coupled. The firmware has no handler for it: like any JSON line with a string t it only marks the link as seen. The device does not pause when the laptop goes silent. No fields.",
       "type": "object",
       "additionalProperties": false,
       "required": ["t"],
       "properties": { "t": { "const": "ping" } }
     },
     "hello": {
-      "description": "Device -> laptop. Sent once when the link task starts (coupling handshake). fw is the firmware version.",
+      "description": "Device -> laptop. Sent when the link task starts (boot) and again whenever a laptop connects over Bluetooth, while any session keeps running. fw is the firmware version.",
       "type": "object",
       "additionalProperties": false,
       "required": ["t", "fw"],
@@ -196,7 +196,7 @@
       ]
     },
     "state": {
-      "description": "Device -> laptop. Current session state, once per second while study/break/long rest runs and once when returning to idle. The device owns the countdown; the dashboard follows it. left/total are the remaining and total seconds of the current phase (0 when idle).",
+      "description": "Device -> laptop. Current session state, once per second whenever the phase is not idle (study, break, long_rest, ready) and once when returning to idle. The device owns the countdown; the dashboard follows it. left/total are the remaining and total seconds of the current phase (0 when idle).",
       "type": "object",
       "additionalProperties": false,
       "required": ["t", "left", "total", "phase", "focus", "session", "drift", "drift_kind", "drift_s", "mult", "xp", "level"],
@@ -223,7 +223,7 @@
           "description": "Kind of the active drift, '' when none."
         },
         "drift_s": { "type": "integer", "minimum": 0, "description": "Seconds the current drift has been active." },
-        "earned": { "type": "integer", "minimum": 0, "description": "Optional. Live XP earned so far in the running study session." },
+        "earned": { "type": "integer", "minimum": 0, "description": "Live XP earned so far in the running study session. Sent only while phase is study." },
         "mult": {
           "type": "integer",
           "minimum": 1,
@@ -231,11 +231,7 @@
           "description": "Effective circle multiplier right now (1 while anyone in the circle drifts)."
         },
         "xp": { "type": "integer", "minimum": 0 },
-        "level": { "type": "integer", "minimum": 1 },
-        "paused": {
-          "type": "boolean",
-          "description": "Optional. True while the device has paused the session because the laptop went silent; false or absent otherwise."
-        }
+        "level": { "type": "integer", "minimum": 1 }
       }
     },
     "end_device": {
@@ -264,7 +260,7 @@
       }
     },
     "circle": {
-      "description": "Device -> laptop. Study circle from ESP-NOW, sent when the set of nearby friends changes (including to empty). Friends are other Study Buddy devices in the circle; pct is their last session's focus percent (0 while mid-session). Up to 4 friends are tracked.",
+      "description": "Device -> laptop. Study circle (linked play, ESP-NOW). Sent whenever what the device shows about its circle changes: a device appears or drops out (6 s without a beacon), or a friend's name, phase, session, focus, pct or group changes, or this device's invite or group role changes. Not sent on connect. The list holds every Pomo in range, not only this device's study group (the message does not say who is in the group); only group members who are studying count toward mult. Up to 4 friends.",
       "type": "object",
       "additionalProperties": false,
       "required": ["t", "friends"],
@@ -281,9 +277,9 @@
               "name": { "type": "string", "maxLength": 10 },
               "focused": {
                 "type": "boolean",
-                "description": "Whether the friend's device is focused (not drifting) right now."
+                "description": "Not drifting right now. Always true for a friend who is not studying."
               },
-              "pct": { "type": "integer", "minimum": 0, "maximum": 100 }
+              "pct": { "type": "integer", "minimum": 0, "maximum": 100, "description": "The friend's last scored session's focus percent; 0 while they are studying (and before their first session)." }
             }
           }
         }
