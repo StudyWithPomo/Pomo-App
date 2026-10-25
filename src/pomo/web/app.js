@@ -52,6 +52,8 @@
     idleDetector: null,
     lovedUntil: 0, // petted: the love face until then (ms)
     care: null, // Milestone E gears and hunger: null until the device reports them (today's firmware never does)
+    feedWait: 0, // a feed request is waiting for the device's pet reply (the 2 s timer)
+    feedUnsupported: false, // this connection's firmware didn't answer feed: feed on the device instead
     shhUntil: 0, // tapped during focus: the shh face until then
     play: { wound: 0, key: 0, shown: null, lastPlay: 0, lastRunDown: 0, dancing: false, danceAt: 0, gear: null, asleep: false, loveUntil: 0, line: '' }
   };
@@ -837,6 +839,9 @@
     S.device = { connected: true, port, writer: enc.writable.getWriter(), stop: null };
     S.lastRx = Date.now();
     S.armed = false;
+    S.feedUnsupported = false;
+    clearTimeout(S.feedWait);
+    S.feedWait = 0;
     setDeviceChip();
     sendConfig();
     readLoop(port);
@@ -1064,7 +1069,8 @@
     focus: { req: ['ts', 'focus', 'state', 'reason'], keys: ['ts', 'focus', 'state', 'reason', 'window', 'yaw', 'pitch', 'ear'] },
     peek: { req: [], keys: [] },
     end: { req: ['scope'], keys: ['scope'] },
-    ping: { req: [], keys: [] }
+    ping: { req: [], keys: [] },
+    feed: { req: [], keys: [] }
   };
   const FOCUS_STATES = ['calibrating', 'focused', 'drifting', 'unfocused'];
   const FOCUS_REASONS = ['absent', 'drowsy', 'looking_away', 'slouching', 'bad_window'];
@@ -1232,20 +1238,49 @@
     if (S.view === 'home') renderHome();
   }
   // The device's pet message; feed attempts made on the device show in the Playground
+  // A fed, empty or stuffed event answers a waiting feed request; a fed event nobody here asked for
+  // is a feed on the device (knob or touch), shown here too. The gear count always comes from the message.
   function onPet(m) {
     const wasHungry = !!(S.care && S.care.hunger === 'hungry');
+    const answer = ['fed', 'empty', 'stuffed'].includes(m.event);
+    if (answer && S.feedWait) { clearTimeout(S.feedWait); S.feedWait = 0; }
     updateCare({ gears: m.gears, max: m.max_gears, hunger: m.hunger, fedAt: m.fed_at });
-    if (S.view !== 'play') return;
+    if (S.view !== 'play' || !answer) return;
     const p = S.play;
-    if (m.event === 'empty') p.line = 'Out of gears! Finish a session to earn some.';
-    else if (m.event === 'stuffed') p.line = "I'm stuffed! Save it for later.";
-    else if (m.event === 'fed') {
-      p.line = wasHungry ? "Oh, that's better!" : 'Crunchy! Thank you.';
-      p.loveUntil = Date.now() + AFTER_MS;
-      squish($('petPlay'));
-    } else return;
+    if (m.event === 'fed') {
+      const woke = playNoted();
+      if (p.gear || p.dancing) { // a gear already flying (or dancing): just the result
+        p.line = wasHungry ? "Oh, that's better!" : 'Crunchy! Thank you.';
+        p.loveUntil = Date.now() + AFTER_MS;
+      } else toss(woke, wasHungry);
+      renderPlay();
+      return;
+    }
+    p.line = m.event === 'empty' ? 'Out of gears! Finish a session to earn some.' : "I'm stuffed! Save it for later.";
     p.lastPlay = Date.now();
     renderPlay();
+  }
+  // Ask the device to feed; the button waits for its pet reply. No reply in 2 s: this firmware
+  // doesn't know feed yet, so the button becomes "Feed on Pomo" for the rest of the connection.
+  const FEED_REPLY_MS = 2000;
+  function requestFeed() {
+    if (S.feedWait) return;
+    playNoted();
+    if (S.feedUnsupported || !S.device.connected) { renderFeedBtn(); return; }
+    send({ t: 'feed' });
+    S.feedWait = setTimeout(() => {
+      S.feedWait = 0;
+      S.feedUnsupported = true;
+      renderFeedBtn();
+    }, FEED_REPLY_MS);
+    renderFeedBtn();
+  }
+  function renderFeedBtn() {
+    const btn = $('feedBtn'), c = S.care, fallback = !!(c && S.feedUnsupported);
+    btn.disabled = !!S.feedWait;
+    btn.textContent = fallback ? 'Feed on Pomo' : 'Feed a gear';
+    btn.classList.toggle('dim', fallback || !!(c && c.gears <= 0));
+    $('feedHint').hidden = !fallback;
   }
   // The gears bars on Home and the Playground: a small gear, then a pip per gear the bar holds
   function renderCare() {
@@ -1261,7 +1296,7 @@
       bar.setAttribute('role', 'img');
       bar.setAttribute('aria-label', 'Gears: ' + c.gears + ' of ' + c.max);
     }
-    $('feedBtn').classList.toggle('dim', !!(c && c.gears <= 0));
+    renderFeedBtn();
   }
 
   // ---------- Home ----------
@@ -1732,10 +1767,14 @@ const HEART_SVG = '<svg viewBox="0 0 7 6" width="100%" height="100%" shape-rende
   function feed() {
     const p = S.play;
     if (S.view !== 'play' || p.dancing || p.gear) return;
+    if (S.care) { requestFeed(); return; } // the device owns the gears and decides every feed
     const woke = playNoted();
-    // With gears from the device, an empty bar means no toss
-    if (S.care && S.care.gears <= 0) { p.line = 'Out of gears! Finish a session to earn some.'; renderPlay(); return; }
-    p.hungryToss = !!(S.care && S.care.hunger === 'hungry');
+    toss(woke, false);
+  }
+  // The gear's flight to the pet and the catch: a free local feed, or a feed the device reports
+  function toss(woke, hungry) {
+    const p = S.play;
+    p.hungryToss = hungry;
     if (!woke) p.line = 'Ooh, a gear!';
     sound(SOUNDS.TOSS);
     const from = $('feedBtn').getBoundingClientRect(), pet = $('petPlay').getBoundingClientRect();

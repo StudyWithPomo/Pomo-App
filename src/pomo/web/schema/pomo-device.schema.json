@@ -12,6 +12,7 @@
     { "$ref": "#/$defs/peek" },
     { "$ref": "#/$defs/end_laptop" },
     { "$ref": "#/$defs/ping" },
+    { "$ref": "#/$defs/feed" },
     { "$ref": "#/$defs/hello" },
     { "$ref": "#/$defs/start_device" },
     { "$ref": "#/$defs/state" },
@@ -144,6 +145,13 @@
         "t": { "const": "end" },
         "scope": { "enum": ["session", "break"] }
       }
+    },
+    "feed": {
+      "description": "Laptop -> device. Needs firmware support (planned with Milestone E): asks the device to feed the pet one gear, as if fed on the device. The device decides and answers with a pet message whose event is fed, empty or stuffed; the laptop never changes the gear count itself. Firmware without it ignores the line. No fields.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t"],
+      "properties": { "t": { "const": "feed" } }
     },
     "ping": {
       "description": "Laptop -> device. Heartbeat, sent every 2 s while the laptop is coupled. The firmware has no handler for it: like any JSON line with a string t it only marks the link as seen. The device does not pause when the laptop goes silent. No fields.",
