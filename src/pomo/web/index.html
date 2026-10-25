@@ -48,6 +48,7 @@
         <div class="home-pet">
           <div class="porthole xl rivets"><canvas id="petHome" width="160" height="160" aria-hidden="true"></canvas></div>
           <span class="label" id="homePetTitle"></span>
+          <p class="italic home-speech" id="homeSpeech" aria-live="polite" hidden></p>
         </div>
         <div class="home-main">
           <div class="home-body" id="homeWelcome" hidden>
@@ -69,11 +70,10 @@
             </div>
             <div class="actions">
               <button id="homeStartBtn" class="btn primary" type="button">Start studying</button>
-              <button id="homeCardBtn" class="btn ghost" type="button" hidden>Last time card</button>
               <button id="homePetBtn" class="btn ghost" type="button">Customize pet</button>
             </div>
           </div>
-          <p class="home-device"><span class="lamp" id="homeLamp"></span><span id="homeDevice"></span></p>
+          <p class="home-device"><span class="lamp" id="homeLamp"></span><span id="homeDevice"></span><button class="text-btn" id="homeConnectBtn" type="button" hidden></button></p>
         </div>
       </div>
       <div class="shelf" id="homeShelfWrap" hidden>

@@ -1274,7 +1274,6 @@
         li.lastChild.textContent = r;
         return li;
       }));
-      $('homeCardBtn').hidden = !S.lastCard;
       renderShelf(cards);
     } else {
       $('homeShelfWrap').hidden = true;
@@ -1283,7 +1282,17 @@
     const awake = S.device.connected;
     $('homeLamp').className = 'lamp' + (awake ? ' on' : '');
     $('homeDevice').parentElement.classList.toggle('awake', awake);
-    $('homeDevice').textContent = awake ? 'Pomo is awake' : S.lost ? 'Pomo lost the link. Reconnect from the top right.' : 'Connect Pomo to begin';
+    // Awake is a status; otherwise the line is the same connect action as the top-bar chip
+    $('homeDevice').hidden = !awake;
+    $('homeDevice').textContent = 'Pomo is awake';
+    $('homeConnectBtn').hidden = awake;
+    const label = S.lost ? 'Reconnect Pomo' : 'Connect Pomo to begin';
+    if ($('homeConnectBtn').textContent !== label) $('homeConnectBtn').textContent = label;
+    $('homeSpeech').hidden = first;
+    if (!first) {
+      const line = petSays();
+      if ($('homeSpeech').textContent !== line) $('homeSpeech').textContent = line;
+    }
     StudyPet.drawPet($('petHome'), petOpts(currentMood()));
   }
   // Today's cards, newest first, at most four; an empty slot on a day with none
@@ -1312,6 +1321,21 @@
       b.addEventListener('click', () => openCard(c));
       return b;
     }));
+  }
+  // What the pet says on Home, from real state, first match wins. The pet is speaking, so no pet name.
+  function petSays() {
+    const names = S.circle.map((f) => f.name);
+    if (names.length) {
+      const who = names.length === 1 ? names[0] : names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1];
+      return who + (names.length === 1 ? ' is' : ' are') + ' nearby. Study together?';
+    }
+    const cards = todaysCards().reverse(); // newest first
+    const proud = cards.find((c) => c.pct >= 80);
+    if (proud) return 'That ' + proud.pct + '% session? Proud of you.';
+    if (cards.some((c) => c.pct < 60)) return "Rough one earlier. Let's try a short one.";
+    if (new Date().getHours() < 5) return "It's late. One short session, then sleep?";
+    if (!S.device.connected) return "Plug me in and we'll get started.";
+    return 'Ready when you are.';
   }
   function goHome() {
     if (S.session) return; // not mid-session
@@ -1505,7 +1529,7 @@ const HEART_SVG = '<svg viewBox="0 0 7 6" width="100%" height="100%" shape-rende
     $('homeStartBtn').addEventListener('click', () => toSetup('goal'));
     $('homeNameBtn').addEventListener('click', () => toSetup('userName'));
     $('homePetBtn').addEventListener('click', () => toSetup('petName'));
-    $('homeCardBtn').addEventListener('click', showLastCard);
+    $('homeConnectBtn').addEventListener('click', connectDevice);
     setDeviceChip();
     renderSetup();
     show('home');

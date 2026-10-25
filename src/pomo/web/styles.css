@@ -462,6 +462,16 @@ main:has(> #view-home:not([hidden])) { padding-bottom: 16px; }
 .home-device { margin: 0; display: flex; align-items: center; gap: 10px; border-top: 1px solid var(--rim); padding-top: 16px; font-size: 16px; color: var(--muted); }
 .home.full .home-device { justify-content: center; border-top: 0; padding-top: 0; }
 .home-device.awake { color: var(--text-soft); }
+.home-speech { max-width: 100%; text-align: center; text-wrap: balance; color: var(--text-soft); }
+/* A quiet text action: reads like the hint beside it, underlined so it's clearly clickable */
+.text-btn {
+  min-height: 44px; padding: 0 4px; background: none; border: 0; cursor: pointer;
+  font: inherit; color: inherit; text-decoration: underline; text-decoration-color: var(--rim); text-underline-offset: 4px;
+}
+.text-btn:hover { color: var(--brass); text-decoration-color: var(--brass); }
+/* Idle life: the pet bobs gently on Home */
+.home .porthole canvas { animation: petBob 3s ease-in-out infinite; }
+@keyframes petBob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
 .home .porthole.xl { width: 228px; height: 228px; } .home .porthole.xl canvas { width: 144px; height: 144px; } /* the pet stays large on Home */
 /* The shelf of today's time cards: small slips of the card's paper */
 .shelf { border-top: 1px solid var(--rim); padding-top: 14px; display: flex; flex-direction: column; gap: 10px; }
@@ -502,6 +512,7 @@ main:has(> #view-home:not([hidden])) { padding-bottom: 16px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .nixie.clock.blink .colon circle { opacity: 1; } /* the colon stays lit */
+  .home .porthole canvas { animation: none; }
 }
 @media (max-width: 760px) {
   .home { flex-direction: column; align-items: stretch; padding: 28px 22px; }
