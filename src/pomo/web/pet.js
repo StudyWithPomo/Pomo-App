@@ -12,6 +12,14 @@
     metal: { shade: [R(4, 12, 8), R(3, 11), R(12, 11)], hi: [R(5, 5, 2), R(4, 6)], rivet: [R(3, 7), R(12, 7)] },
     nubs: { line: [R(5, 2), R(10, 2)] },
     key: { shade: [R(5, 0, 2, 2), R(9, 0, 2, 2)], line: [R(7, 0, 2, 3)] },
+    // The wind-up key turning, frames 0-3 (Firmware-Pomo docs/PET_PLAY_AND_CARE.md, "Winding": key frames).
+    // Frame 0 is the bot's key; 3 is the same as 1.
+    keyFrames: [
+      { shade: [R(5, 0, 2, 2), R(9, 0, 2, 2)], line: [R(7, 0, 2, 3)] },
+      { shade: [R(6, 0, 1, 2), R(9, 0, 1, 2)], line: [R(7, 0, 2, 3)] },
+      { line: [R(7, 0, 2, 3)] },
+      { shade: [R(6, 0, 1, 2), R(9, 0, 1, 2)], line: [R(7, 0, 2, 3)] }
+    ],
     cat: {
       line: [R(3, 1, 1, 4), R(4, 2), R(12, 1, 1, 4), R(11, 2), R(0, 9, 2), R(0, 11, 2), R(14, 9, 2), R(14, 11, 2)],
       cheek: [R(4, 3), R(11, 3)], body: [R(4, 4), R(11, 4)]
@@ -58,9 +66,13 @@
     };
     paint({ body: PET.body, line: PET.line });
     paint(PET.metal);
-    if (o.body === 'bot') paint(PET.key);
+    // opts.key (0-3): every body wears the turning key, as in the Playground. Draw order per the doc:
+    // base, metal, body layer (for the bot the key frame replaces it), key frame, mood, accessories, monocle.
+    const keyed = Number.isInteger(o.key);
+    if (o.body === 'bot' && !keyed) paint(PET.key);
     if (o.body === 'cat') paint(PET.cat);
     if (o.body === 'dog') paint(PET.dog);
+    if (keyed) paint(PET.keyFrames[((o.key % 4) + 4) % 4]);
     paint(PET.moods[o.mood] || PET.moods.happy);
     if (o.level >= 5) paint(PET.goggles);
     if (o.level >= 10) paint(PET.tie);

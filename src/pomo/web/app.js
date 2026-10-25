@@ -50,7 +50,9 @@
     peekUntil: 0,
     speed: 1,
     idleDetector: null,
-    isPetting: false
+    lovedUntil: 0, // petted: the love face until then (ms)
+    shhUntil: 0, // tapped during focus: the shh face until then
+    play: { wound: 0, key: 0, shown: null, lastPlay: 0, lastRunDown: 0, dancing: false, danceAt: 0, gear: null, asleep: false, loveUntil: 0, line: '' }
   };
   const breakRange = (study) => [Math.ceil(study / 5), Math.floor(study / 3)];
   const STUDY_MIN = 15, STUDY_MAX = 90, STUDY_STEP = 5; // the device accepts 15-90 in steps of 5
@@ -72,9 +74,9 @@
   // ---------- Views ----------
   function show(view) {
     S.view = view;
-    for (const v of ['home', 'setup', 'live', 'card']) $('view-' + v).hidden = v !== view;
+    for (const v of ['home', 'play', 'setup', 'live', 'card']) $('view-' + v).hidden = v !== view;
     $('brandBtn').setAttribute('aria-disabled', String(!!S.session)); // Home only between sessions
-    document.querySelector('.steps').hidden = view === 'home'; // Home isn't a step
+    document.querySelector('.steps').hidden = view === 'home' || view === 'play'; // neither is a step
     if (view !== 'card') S.viewCard = null;
     // Progress markers, not links: earlier steps read as done, the current one is lit.
     const here = ['setup', 'live', 'card'].indexOf(view);
@@ -236,11 +238,12 @@
   function drawPets() {
     const card = S.viewCard || S.lastCard;
     if (card) {
-      StudyPet.drawPet($('petCard'), petOpts(S.isPetting ? 'love' : card.mood));
+      StudyPet.drawPet($('petCard'), petOpts(petted() ? 'love' : card.mood));
     }
     StudyPet.drawPet($('petSetup'), petOpts(currentMood()));
     StudyPet.drawPet($('petLive'), petOpts(currentMood()));
     StudyPet.drawPet($('petHome'), petOpts(currentMood()));
+    if (S.view === 'play') renderPlay();
   }
 
   // ---------- Nixie tubes ----------
@@ -485,10 +488,10 @@
   function currentMood() {
     const s = S.session;
     if (linkDown()) return 'sad';
-    if (S.isPetting && (!s || s.mode === 'break')) return 'love';
+    if (petted() && (!s || s.mode === 'break')) return 'love';
     if (!s) return 'happy';
     if (s.mode === 'break') return 'happy';
-    if (S.isPetting) return 'shh';
+    if (hushed()) return 'shh';
     return s.drift ? 'annoyed' : 'focus';
   }
   // ---------- Live view ----------
@@ -1432,50 +1435,329 @@ const HEART_SVG = '<svg viewBox="0 0 7 6" width="100%" height="100%" shape-rende
     b.hidden = !show;
   }
 
-  function spawnHeart(porthole) {
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  // ---------- Petting (Firmware-Pomo docs/PET_PLAY_AND_CARE.md, Part 1 "Petting") ----------
+  // Outside focus: a tap (on press) hops the porthole, sends three hearts and the love face for 2 s;
+  // a stroke squishes the pet and sends one heart. In focus a tap only hushes it (shh for 2 s).
+  const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const petted = () => Date.now() < S.lovedUntil;
+  const hushed = () => Date.now() < S.shhUntil;
+  const PET_FACE_MS = 2000;
+  // The face changes back by itself: redraw just after it runs out
+  function redrawAfter(ms) { setTimeout(drawPets, ms + 20); }
+
+  // A heart at viewport (x, y): rises 38 px over 900 ms (ease-out), opaque for the first half, then fades
+  function heartAt(x, y) {
     const h = document.createElement('span');
+    h.className = 'heart-fx';
     h.innerHTML = HEART_SVG;
-    h.className = 'pet-heart';
-    h.style.left = (30 + Math.random() * 40) + '%';
-    h.style.top = '30%';
-    porthole.appendChild(h);
-    h.addEventListener('animationend', () => h.remove());
+    h.style.left = Math.round(x) + 'px';
+    h.style.top = Math.round(y) + 'px';
+    document.body.appendChild(h);
+    if (!reducedMotion()) h.animate([{ transform: 'translateY(0)' }, { transform: 'translateY(-38px)' }], { duration: 900, easing: 'ease-out' });
+    h.animate([{ opacity: 1 }, { opacity: 1, offset: 0.5 }, { opacity: 0 }], { duration: 900 }).onfinish = () => h.remove();
+  }
+  // Three hearts at the doc's offsets from the porthole's centre (x) and top (y), 120 ms apart
+  function tapHearts(porthole) {
+    const r = porthole.getBoundingClientRect();
+    if (!r.width) return; // not on screen
+    const cx = r.left + r.width / 2;
+    [[-22, 6], [2, 0], [18, 10]].forEach(([dx, dy], i) => setTimeout(() => heartAt(cx + dx, r.top + dy), i * 120));
+  }
+  // One heart from a random spot: ±20 px of centre, 0-10 px below the porthole's top
+  function strokeHeart(porthole) {
+    const r = porthole.getBoundingClientRect();
+    if (!r.width) return;
+    heartAt(r.left + r.width / 2 + (Math.random() * 40 - 20), r.top + Math.random() * 10);
+  }
+  // The porthole hops 5 px: 110 ms up, 140 ms down
+  function hop(el) {
+    if (reducedMotion()) return;
+    el.animate([{ transform: 'translateY(0)', easing: 'ease-out' }, { transform: 'translateY(-5px)', offset: 110 / 250, easing: 'ease-in' }, { transform: 'translateY(0)' }],
+      { duration: 250, composite: 'add' });
+  }
+  // The pet squishes to 115% width and back: 110 ms out, 170 ms back, ease-out
+  function squish(canvas) {
+    if (reducedMotion() || !canvas) return;
+    canvas.animate([{ transform: 'scaleX(1)', easing: 'ease-out' }, { transform: 'scaleX(1.15)', offset: 110 / 280, easing: 'ease-out' }, { transform: 'scaleX(1)' }],
+      { duration: 280, composite: 'add' });
+  }
+  function hush(porthole) {
+    S.shhUntil = Date.now() + PET_FACE_MS;
+    drawPets();
+    if (S.view === 'live') renderLive();
+    redrawAfter(PET_FACE_MS);
+    showBubble(porthole, true);
+    clearTimeout(hush.t);
+    hush.t = setTimeout(() => showBubble(porthole, false), PET_FACE_MS);
+    sound(SOUNDS.SHH);
+  }
+  function loved(ms) {
+    S.lovedUntil = Math.max(S.lovedUntil, Date.now() + ms);
+    drawPets();
+    redrawAfter(ms);
   }
 
   function wirePetting(porthole) {
-    let dist = 0;
-    let nextHeartAt = 150;
-    let leaveTimer;
-
+    const canvas = porthole.querySelector('canvas');
+    let pressed = false, travel = 0, lastStroke = 0;
+    porthole.addEventListener('pointerdown', (e) => {
+      if (S.play.dancing) return; // the dance ignores petting
+      pressed = true;
+      travel = 0;
+      try { porthole.setPointerCapture(e.pointerId); } catch (err) { /* the stroke still counts while over the pet */ }
+      if (S.session && S.session.mode === 'focus') { hush(porthole); return; }
+      loved(PET_FACE_MS);
+      hop(porthole);
+      tapHearts(porthole);
+      sound(SOUNDS.PET);
+      notePlay();
+    });
+    // A stroke: every 30 px of |dx| + |dy|, at most once per 250 ms. Pointer capture keeps counting off the pet.
     porthole.addEventListener('pointermove', (e) => {
-      clearTimeout(leaveTimer);
-      dist += Math.abs(e.movementX) + Math.abs(e.movementY);
-
-      if (dist >= 150 && !S.isPetting) {
-        S.isPetting = true;
-        drawPets();
-      }
-
-      if (S.session && S.session.mode === 'focus' && S.isPetting) {
-        showBubble(porthole, true);
-      }
-
-      if (!(S.session && S.session.mode === 'focus') && (dist >= nextHeartAt)){
-        spawnHeart(porthole);
-        nextHeartAt += 150;
-      }
+      if (!pressed || S.play.dancing || (S.session && S.session.mode === 'focus')) return;
+      travel += Math.abs(e.movementX) + Math.abs(e.movementY);
+      const now = Date.now();
+      if (travel < 30 || now - lastStroke < 250) return;
+      travel = 0;
+      lastStroke = now;
+      loved(PET_FACE_MS);
+      squish(canvas);
+      strokeHeart(porthole);
+      sound(SOUNDS.PURR);
+      notePlay();
     });
+    const release = () => { pressed = false; };
+    porthole.addEventListener('pointerup', release);
+    porthole.addEventListener('pointercancel', release);
+  }
 
-    porthole.addEventListener('pointerleave', () => {
-      leaveTimer = setTimeout(() => {
-        dist = 0;
-        nextHeartAt = 150;
-        S.isPetting = false;
-        drawPets();
-        showBubble(porthole, false);
-      }, 600);
+  // ---------- Sounds (PET_PLAY_AND_CARE.md, "Sounds") ----------
+  // Each note is [hz, vol 0-50, ms]; hz 0 is a rest. Square waves on the shared AudioContext.
+  const SOUNDS = {
+    PET: [[1150, 25, 45], [0, 0, 35], [1400, 30, 45], [0, 0, 35], [1750, 35, 80]],
+    PURR: [[520, 18, 35], [0, 0, 10], [600, 18, 35], [0, 0, 10], [520, 18, 45]],
+    WIND: [[3400, 25, 6], [0, 0, 14], [2900, 20, 5]],
+    DANCE: [2093, 2637, 3136, 2637, 2349, 2793, 3520, 2793].map((hz) => [hz, 30, 110]).concat([[3136, 30, 160], [0, 0, 40], [4186, 30, 220]]),
+    TOSS: [[1800, 12, 20], [2300, 12, 20], [2900, 12, 25]],
+    CRUNCH: [[420, 40, 25], [0, 0, 20], [360, 40, 25], [0, 0, 60], [440, 35, 25], [0, 0, 20], [380, 35, 30]],
+    SHH: [[880, 20, 70]]
+  };
+  const SOUND_GAIN = 0.06; // gain at vol 50 (the doc's "full"), kept well down so the sounds stay quiet
+  function sound(notes) {
+    const ac = getAudio();
+    if (!ac) return;
+    const play = () => {
+      if (ac.state !== 'running') return; // not unlocked yet: stay silent
+      let t = ac.currentTime + 0.01;
+      for (const [hz, vol, ms] of notes) {
+        const d = ms / 1000;
+        if (hz) {
+          const o = ac.createOscillator(), g = ac.createGain(), peak = SOUND_GAIN * vol / 50;
+          o.type = 'square';
+          o.frequency.value = hz;
+          g.gain.setValueAtTime(0, t);
+          g.gain.linearRampToValueAtTime(peak, t + 0.002);
+          g.gain.setValueAtTime(peak, t + d - 0.002);
+          g.gain.linearRampToValueAtTime(0, t + d);
+          o.connect(g).connect(ac.destination);
+          o.start(t);
+          o.stop(t + d + 0.01);
+        }
+        t += d;
+      }
+    };
+    if (ac.state === 'suspended') ac.resume().then(play, () => {}); else play();
+  }
+
+  // ---------- Playground (PET_PLAY_AND_CARE.md, Part 1 "The Playground") ----------
+  const WIND_FULL = 12, RUN_DOWN_AFTER = 3000, RUN_DOWN_EVERY = 600, DANCE_MS = 3000, AFTER_MS = 1500;
+  const FLIGHT_MS = 650, SLEEP_AFTER = 20000, HOLD_DELAY = 400, HOLD_REPEAT = 150;
+  const IDLE_LINE = 'Wind my key, or toss me a gear!';
+  const gearSvg = (rects) => '<svg viewBox="0 0 7 7" width="21" height="21" shape-rendering="crispEdges" aria-hidden="true"><g fill="currentColor">' +
+    rects.map(([x, y, w, h]) => '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '"/>').join('') + '</g></svg>';
+  // The gear's two tumbling frames, 7x7 (Feeding)
+  const GEAR_FRAMES = [
+    gearSvg([[3, 0, 1, 1], [1, 1, 5, 1], [1, 2, 2, 1], [4, 2, 2, 1], [0, 3, 2, 1], [5, 3, 2, 1], [1, 4, 2, 1], [4, 4, 2, 1], [1, 5, 5, 1], [3, 6, 1, 1]]),
+    gearSvg([[1, 0, 1, 1], [5, 0, 1, 1], [2, 1, 3, 1], [1, 2, 2, 1], [4, 2, 2, 1], [1, 3, 1, 1], [5, 3, 1, 1], [1, 4, 2, 1], [4, 4, 2, 1], [2, 5, 3, 1], [1, 6, 1, 1], [5, 6, 1, 1]])
+  ];
+  const playPorthole = () => $('petPlay').parentElement;
+
+  // Moods in the Playground, highest wins: dancing / just danced or caught / petted -> love; asleep -> sleep; else happy
+  function playMood() {
+    const p = S.play, now = Date.now();
+    if (p.dancing || now < p.loveUntil || petted()) return 'love';
+    if (p.asleep) return 'sleep';
+    return 'happy';
+  }
+  function renderPlay() {
+    const p = S.play;
+    StudyPet.drawPet($('petPlay'), Object.assign(petOpts(playMood()), { key: p.key }));
+    const level = Math.max(0, Math.min(WIND_FULL, Math.ceil(p.shown != null ? p.shown : p.wound)));
+    const cells = $('windGauge').children;
+    for (let i = 0; i < WIND_FULL; i++) cells[i].classList.toggle('on', i < level);
+    $('windGauge').setAttribute('aria-valuenow', String(level));
+    $('windCount').replaceChildren(...withNums([{ n: level }, ' / ', { n: WIND_FULL }]));
+    if ($('playSpeech').textContent !== p.line) $('playSpeech').textContent = p.line;
+    renderPlay.mood = playMood();
+  }
+  // Any play resets the idle clocks and wakes a sleeping pet, which then says hello instead of its usual line
+  function playNoted() {
+    const p = S.play;
+    p.lastPlay = Date.now();
+    if (!p.asleep) return false;
+    p.asleep = false;
+    p.line = 'Oh! Hello again.';
+    return true;
+  }
+  function notePlay() {
+    if (S.view !== 'play') return;
+    playNoted();
+    renderPlay();
+  }
+  function openPlay() {
+    if (S.session) return;
+    const p = S.play;
+    p.lastPlay = Date.now();
+    p.asleep = false;
+    if (!p.wound && !p.dancing) p.line = IDLE_LINE;
+    show('play');
+    renderPlay();
+    playLoop();
+  }
+  // One click of the key (a knob detent, a tap of Wind, or one repeat while it's held)
+  function wind() {
+    const p = S.play;
+    if (S.view !== 'play' || p.dancing) return;
+    const woke = playNoted();
+    p.wound = Math.min(WIND_FULL, p.wound + 1);
+    p.key = (p.key + 1) % 4;
+    sound(SOUNDS.WIND);
+    if (p.wound >= WIND_FULL) { startDance(); return; }
+    if (!woke) p.line = p.wound <= 5 ? 'Keep winding...' : 'Almost there!';
+    renderPlay();
+  }
+  // The dance: 3 s, three turns (drawn at |cos(angle)| width, mirrored while cos < 0), a hop every half turn
+  function startDance() {
+    const p = S.play;
+    p.dancing = true;
+    p.danceAt = Date.now();
+    p.line = 'Wheee!';
+    tapHearts(playPorthole());
+    sound(SOUNDS.DANCE);
+    renderPlay();
+    playLoop();
+  }
+  function endDance() {
+    const p = S.play;
+    p.dancing = false;
+    p.wound = 0;
+    p.key = 0;
+    p.shown = null;
+    $('petPlay').style.transform = '';
+    playPorthole().style.transform = '';
+    tapHearts(playPorthole());
+    p.line = 'Again! Again!';
+    p.loveUntil = Date.now() + AFTER_MS;
+    p.lastPlay = Date.now();
+    renderPlay();
+  }
+  // Toss a gear (free and unlimited in Milestone D): one in the air at a time
+  function feed() {
+    const p = S.play;
+    if (S.view !== 'play' || p.dancing || p.gear) return;
+    const woke = playNoted();
+    if (!woke) p.line = 'Ooh, a gear!';
+    sound(SOUNDS.TOSS);
+    const from = $('feedBtn').getBoundingClientRect(), pet = $('petPlay').getBoundingClientRect();
+    if (reducedMotion()) { // no flight: the result straight away
+      renderPlay();
+      setTimeout(caught, 100);
+      return;
+    }
+    const el = document.createElement('span');
+    el.className = 'gear-fx';
+    document.body.appendChild(el);
+    // From the top-centre of the Feed button to 5/8 of the way down the pet (its mouth)
+    p.gear = { el, at: Date.now(), frame: -1, sx: from.left + from.width / 2, sy: from.top, ex: pet.left + pet.width / 2, ey: pet.top + pet.height * 5 / 8 };
+    renderPlay();
+    playLoop();
+  }
+  function caught() {
+    const p = S.play;
+    squish($('petPlay'));
+    p.line = 'Crunchy! Thank you.';
+    p.loveUntil = Date.now() + AFTER_MS;
+    p.lastPlay = Date.now();
+    sound(SOUNDS.CRUNCH);
+    renderPlay();
+  }
+  // Runs while the Playground is open (or a dance or gear is still finishing)
+  function playLoop() {
+    if (playLoop.on) return;
+    playLoop.on = true;
+    const step = () => {
+      const p = S.play, now = Date.now();
+      if (S.view !== 'play' && !p.dancing && !p.gear) { playLoop.on = false; return; }
+      if (p.gear) {
+        const g = p.gear, t = Math.min(1, (now - g.at) / FLIGHT_MS);
+        // A straight line plus an arc 45·sin(180°·t) px upward; the frame swaps every 90/1000 of the flight
+        const x = g.sx + (g.ex - g.sx) * t, y = g.sy + (g.ey - g.sy) * t - 45 * Math.sin(Math.PI * t);
+        g.el.style.left = Math.round(x - 10.5) + 'px';
+        g.el.style.top = Math.round(y - 10.5) + 'px';
+        const frame = Math.floor(t / 0.09) % 2;
+        if (frame !== g.frame) { g.frame = frame; g.el.innerHTML = GEAR_FRAMES[frame]; }
+        if (t >= 1) { g.el.remove(); p.gear = null; caught(); }
+      }
+      if (p.dancing) {
+        const t = now - p.danceAt;
+        if (t >= DANCE_MS) endDance();
+        else {
+          const angle = (t * 360 * 3 / DANCE_MS) % 360, rad = angle * Math.PI / 180;
+          if (!reducedMotion()) {
+            $('petPlay').style.transform = 'scaleX(' + Math.cos(rad).toFixed(3) + ')';
+            playPorthole().style.transform = 'translateY(' + (-Math.abs(Math.sin(2 * rad)) * 6).toFixed(1) + 'px)';
+          }
+          p.key = Math.floor(t / 60) % 4; // the key spins fast
+          p.shown = WIND_FULL * (1 - t / DANCE_MS); // the gauge drains over the 3 s
+          renderPlay();
+        }
+      } else if (S.view === 'play') {
+        // Left alone 3 s: run down one click every 0.6 s, the key turning back a frame
+        if (p.wound > 0 && now - p.lastPlay >= RUN_DOWN_AFTER && now - p.lastRunDown >= RUN_DOWN_EVERY) {
+          p.wound--;
+          p.key = (p.key + 3) % 4;
+          p.lastRunDown = now;
+          if (!p.wound) p.line = IDLE_LINE;
+          renderPlay();
+        }
+        // 20 s with nobody playing, nothing wound and no gear in the air: asleep
+        if (!p.asleep && !p.wound && !p.gear && now - p.lastPlay >= SLEEP_AFTER) {
+          p.asleep = true;
+          p.line = 'Zzz...';
+          renderPlay();
+        }
+        if (renderPlay.mood !== playMood()) renderPlay(); // love running out
+      }
+      setTimeout(step, 16); // about 60 fps; unlike rAF it keeps the clocks running in a background tab
+    };
+    setTimeout(step, 16);
+  }
+  function wirePlay() {
+    $('windGauge').replaceChildren(...Array.from({ length: WIND_FULL }, () => document.createElement('i')));
+    const btn = $('windBtn');
+    let hold = 0;
+    const stop = () => clearTimeout(hold);
+    // Hold Wind to repeat; a keyboard press of the button (click with detail 0) is one click
+    btn.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      wind();
+      stop();
+      hold = setTimeout(function again() { wind(); hold = setTimeout(again, HOLD_REPEAT); }, HOLD_DELAY);
     });
+    ['pointerup', 'pointerleave', 'pointercancel'].forEach((ev) => btn.addEventListener(ev, stop));
+    btn.addEventListener('click', (e) => { if (e.detail === 0) wind(); });
+    $('feedBtn').addEventListener('click', feed);
+    $('playBackBtn').addEventListener('click', goHome);
   }
 
   // ---------- Wire up ----------
@@ -1520,6 +1802,8 @@ const HEART_SVG = '<svg viewBox="0 0 7 6" width="100%" height="100%" shape-rende
         if (S.view === 'card') renderBoard();
         return;
       }
+      // Playground: Up, Right and Space are the knob's detents (a focused button handles its own keys)
+      if (S.view === 'play' && ['ArrowUp', 'ArrowRight', ' '].includes(e.key) && !e.target.closest('button')) { e.preventDefault(); wind(); return; }
       const map = { y: 'site', i: 'idle', f: 'friend', s: 'fast', e: 'finish' };
       if (map[e.key.toLowerCase()]) demo(map[e.key.toLowerCase()]);
       if (e.key === ' ' && S.view === 'live') { e.preventDefault(); peek(); }
@@ -1529,6 +1813,8 @@ const HEART_SVG = '<svg viewBox="0 0 7 6" width="100%" height="100%" shape-rende
     $('homeStartBtn').addEventListener('click', () => toSetup('goal'));
     $('homeNameBtn').addEventListener('click', () => toSetup('userName'));
     $('homePetBtn').addEventListener('click', () => toSetup('petName'));
+    $('homePlayBtn').addEventListener('click', openPlay);
+    wirePlay();
     $('homeConnectBtn').addEventListener('click', connectDevice);
     setDeviceChip();
     renderSetup();
