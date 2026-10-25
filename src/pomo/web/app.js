@@ -14,6 +14,7 @@
   const LONG_BREAK = 15;
   const STUDY_OPTIONS = [15, 25, 45, 60];
   const DISTRACTING = ['youtube', 'instagram', 'tiktok', 'reddit', 'netflix', 'twitter', 'x.com', 'twitch', 'discord', 'facebook'];
+  const SITE_LABELS = { youtube: 'YouTube', instagram: 'Instagram', tiktok: 'TikTok', reddit: 'Reddit', netflix: 'Netflix', twitter: 'Twitter', 'x.com': 'X', twitch: 'Twitch', discord: 'Discord', facebook: 'Facebook' };
   const ROMAN = ['I', 'II', 'III', 'IV'];
   const $ = (id) => document.getElementById(id);
 
@@ -26,7 +27,7 @@
   function demoCircle() { return [{ name: 'Ava', focused: true }, { name: 'Dev', focused: true }]; }
   const S = {
     view: 'setup',
-    settings: Object.assign({ user: 'Sidak', name: 'Mochi', body: 'bot', face: 'plain', color: 'brass', pinTime: false, pinScore: false, study: 25, brk: 5, goal: '' }, store.get('settings', {})),
+    settings: Object.assign({ user: 'Sidak', name: 'Mochi', body: 'bot', face: 'plain', color: 'brass', pinTime: false, pinScore: false, study: 25, brk: 5, custom: false, goal: '' }, store.get('settings', {})),
     progress: Object.assign({ level: 3, xp: 340, hearts: 3 }, store.get('progress', {})),
     sessionNo: 1,
     session: null,
@@ -49,6 +50,8 @@
     isPetting: false
   };
   const breakRange = (study) => [Math.ceil(study / 5), Math.floor(study / 3)];
+  const STUDY_MIN = 15, STUDY_MAX = 90, STUDY_STEP = 5; // the device accepts 15-90 in steps of 5
+  const longRest = (study) => Math.max(LONG_BREAK, Math.floor(study / 3));
   const two = (n) => String(n).padStart(2, '0');
   const mmss = (sec) => two(Math.floor(sec / 60)) + ':' + two(Math.floor(sec % 60));
   const clock = (d) => d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -88,19 +91,53 @@
     return b;
   }
 
+  // Numbers go in the chips' monospace face: the display font has old-style figures ('40' reads as '4o').
+  function withNums(parts) {
+    return parts.map((p) => {
+      if (typeof p === 'string') return document.createTextNode(p);
+      const s = document.createElement('span');
+      s.className = 'num';
+      s.textContent = String(p.n);
+      return s;
+    });
+  }
+
   function renderSetup() {
     const st = S.settings;
+    if (!STUDY_OPTIONS.includes(st.study)) st.custom = true;
+    if (st.custom) st.study = Math.min(STUDY_MAX, Math.max(STUDY_MIN, Math.round(st.study / STUDY_STEP) * STUDY_STEP));
     const [bMin, bMax] = breakRange(st.study);
-    if (st.brk < bMin || st.brk > bMax) st.brk = bMin;
+    if (st.custom) st.brk = Math.min(bMax, Math.max(bMin, st.brk)); // a new study length re-clamps the break
+    else if (st.brk < bMin || st.brk > bMax) st.brk = bMin;
 
-    $('studyChips').replaceChildren(...STUDY_OPTIONS.map((m) => chip(m + ' min', st.study === m, () => { st.study = m; st.brk = Math.ceil(m / 5); save(); renderSetup(); })));
-    const breaks = [];
-    for (let b = bMin; b <= bMax; b++) breaks.push(chip(b + 'm', st.brk === b, () => { st.brk = b; save(); renderSetup(); }, 'verd-chip'));
-    $('breakChips').replaceChildren(...breaks);
+    const studyChips = STUDY_OPTIONS.map((m) => chip(m + ' min', !st.custom && st.study === m, () => { st.custom = false; st.study = m; st.brk = Math.ceil(m / 5); save(); renderSetup(); }));
+    studyChips.push(chip('Custom', st.custom, () => { st.custom = true; save(); renderSetup(); $('studyDial').focus(); }));
+    $('studyChips').replaceChildren(...studyChips);
+    $('customStudy').hidden = !st.custom;
+    $('studyBreak').classList.toggle('custom', st.custom);
+    updateDial();
+    if (st.custom) {
+      const step = (label, aria, delta) => {
+        const b = chip(label, false, () => { st.brk = Math.min(bMax, Math.max(bMin, st.brk + delta)); save(); renderSetup(); }, 'verd-chip');
+        b.removeAttribute('aria-pressed');
+        b.setAttribute('aria-label', aria);
+        b.disabled = delta < 0 ? st.brk <= bMin : st.brk >= bMax;
+        return b;
+      };
+      const val = document.createElement('span');
+      val.className = 'step-val mono';
+      val.textContent = st.brk + ' min';
+      $('breakChips').replaceChildren(step('\u2212', 'Shorter break', -1), val, step('+', 'Longer break', 1));
+    } else {
+      const breaks = [];
+      for (let b = bMin; b <= bMax; b++) breaks.push(chip(b + 'm', st.brk === b, () => { st.brk = b; save(); renderSetup(); }, 'verd-chip'));
+      $('breakChips').replaceChildren(...breaks);
+    }
+    $('longRest').textContent = 'Long rest after four sessions: ' + longRest(st.study) + ' min.';
     $('breakRule').textContent = 'Between a fifth and a third of study time: ' + bMin + '–' + bMax + ' min for ' + st.study + ' min.' + (st.study === 25 && st.brk === 5 ? ' Classic Pomodoro.' : '');
-    $('beginBtn').textContent = 'Begin · ' + st.study + ' / ' + st.brk + '  ·  Session ' + ROMAN[S.sessionNo - 1] + ' of IV';
+    $('beginBtn').replaceChildren(...withNums(['Begin · ', { n: st.study }, ' min']));
     const mult = multiplier();
-    $('circleHint').textContent = S.circle.length ? 'Study circle: ' + S.circle.map((f) => f.name).join(' and ') + ' · ' + mult + '× XP' : 'No study circle nearby · 1× XP';
+    $('circleHint').replaceChildren(...withNums(['then ' + ([8, 11, 18].includes(st.brk) ? 'an ' : 'a '), { n: st.brk }, ' min break · Session ' + ROMAN[S.sessionNo - 1] + ' of IV'].concat(S.circle.length ? [' · Study circle: ' + S.circle.map((f) => f.name).join(' and ') + ', ', { n: mult }, '× XP'] : [])));
 
     $('bodyChips').replaceChildren(...[['bot', 'Clockwork bot'], ['cat', 'Cat'], ['dog', 'Dog']].map(([k, l]) => chip(l, st.body === k, () => { st.body = k; petChanged(); }, 'word')));
     $('faceChips').replaceChildren(...[['plain', 'Plain'], ['monocle', 'Monocle']].map(([k, l]) => chip(l, st.face === k, () => { st.face = k; petChanged(); }, 'word')));
@@ -117,6 +154,68 @@
     $('finishLabel').textContent = 'Finish · ' + st.color.charAt(0).toUpperCase() + st.color.slice(1);
     $('petTitle').textContent = petName() + ' · Lv ' + S.progress.level;
     drawPets();
+  }
+
+  // ---------- Study dial (custom length) ----------
+  // A 270-degree sweep from bottom-left (15 min) to bottom-right (90 min); ticks every 5 min.
+  const DIAL_START = -135, DIAL_SWEEP = 270;
+  const dialDeg = (v) => DIAL_START + ((v - STUDY_MIN) / (STUDY_MAX - STUDY_MIN)) * DIAL_SWEEP;
+  const dialPt = (r, deg) => { const a = (deg * Math.PI) / 180; return [(80 + r * Math.sin(a)).toFixed(1), (80 - r * Math.cos(a)).toFixed(1)]; };
+  function buildDial() {
+    let g = '';
+    for (let v = STUDY_MIN; v <= STUDY_MAX; v += STUDY_STEP) {
+      const major = v % 15 === 0, d = dialDeg(v);
+      const [x1, y1] = dialPt(major ? 51 : 55, d), [x2, y2] = dialPt(62, d);
+      g += '<line class="tick" data-v="' + v + '" x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '"/>';
+      if (major) { const [lx, ly] = dialPt(71, d); g += '<text class="lbl" x="' + lx + '" y="' + ly + '" text-anchor="middle" dominant-baseline="central">' + v + '</text>'; }
+    }
+    $('studyDial').innerHTML = '<svg viewBox="0 0 160 160" aria-hidden="true">' + g +
+      '<circle class="knob" cx="80" cy="80" r="44"/>' +
+      '<line class="notch" id="dialNotch" x1="80" y1="46" x2="80" y2="38"/>' +
+      '<text class="val" id="dialVal" x="80" y="74" text-anchor="middle" dominant-baseline="central"></text>' +
+      '<text class="unit" x="80" y="97" text-anchor="middle" dominant-baseline="central">min</text></svg>';
+  }
+  function updateDial() {
+    const st = S.settings, dial = $('studyDial');
+    const [x1, y1] = dialPt(33, dialDeg(st.study)), [x2, y2] = dialPt(42, dialDeg(st.study));
+    const n = $('dialNotch');
+    n.setAttribute('x1', x1); n.setAttribute('y1', y1); n.setAttribute('x2', x2); n.setAttribute('y2', y2);
+    $('dialVal').textContent = String(st.study);
+    dial.querySelectorAll('.tick').forEach((t) => t.classList.toggle('on', Number(t.dataset.v) <= st.study));
+    dial.setAttribute('aria-valuenow', String(st.study));
+    dial.setAttribute('aria-valuetext', st.study + ' minutes');
+  }
+  function setStudy(v) {
+    v = Math.min(STUDY_MAX, Math.max(STUDY_MIN, Math.round(v / STUDY_STEP) * STUDY_STEP));
+    if (v === S.settings.study) return;
+    S.settings.study = v;
+    save();
+    renderSetup(); // re-clamps the break and updates the labels
+  }
+  function wireDial() {
+    const dial = $('studyDial');
+    buildDial();
+    let last = null; // previous pointer angle, to stop a drag wrapping across the gap at the bottom
+    const fromPointer = (e) => {
+      const r = dial.getBoundingClientRect();
+      let a = (Math.atan2(e.clientX - (r.left + r.width / 2), -(e.clientY - (r.top + r.height / 2))) * 180) / Math.PI;
+      if (last !== null && Math.abs(a - last) > 180) a = last < 0 ? DIAL_START : -DIAL_START;
+      last = a;
+      a = Math.min(-DIAL_START, Math.max(DIAL_START, a));
+      setStudy(STUDY_MIN + ((a - DIAL_START) / DIAL_SWEEP) * (STUDY_MAX - STUDY_MIN));
+    };
+    dial.addEventListener('pointerdown', (e) => { last = null; dial.setPointerCapture(e.pointerId); dial.focus(); fromPointer(e); e.preventDefault(); });
+    dial.addEventListener('pointermove', (e) => { if (dial.hasPointerCapture(e.pointerId)) fromPointer(e); });
+    dial.addEventListener('pointerup', () => { last = null; });
+    dial.addEventListener('wheel', (e) => { e.preventDefault(); setStudy(S.settings.study + (e.deltaY < 0 ? STUDY_STEP : -STUDY_STEP)); }, { passive: false });
+    dial.addEventListener('keydown', (e) => {
+      const st = S.settings.study;
+      const to = { ArrowUp: st + STUDY_STEP, ArrowRight: st + STUDY_STEP, ArrowDown: st - STUDY_STEP, ArrowLeft: st - STUDY_STEP,
+        PageUp: st + 15, PageDown: st - 15, Home: STUDY_MIN, End: STUDY_MAX }[e.key];
+      if (to === undefined) return;
+      e.preventDefault();
+      setStudy(to);
+    });
   }
 
   function petChanged() {
@@ -332,7 +431,7 @@
     S.lastCard = {
       no: S.sessionNo, goal: s.goal, startedAt: s.startedAt, endedAt: new Date(), early: m ? m.early : early,
       total: s.total, done, focusedSec, pct, focusedMin, mult, earned, penalty,
-      heartDelta, leveled, before, test: !!(m && S.testTiming), events: s.events.slice(), minutes: minuteKinds(s, true), brk: s.brk, finished: null
+      study: s.study, heartDelta, leveled, before, test: !!(m && S.testTiming), events: s.events.slice(), minutes: minuteKinds(s, true), brk: s.brk, finished: null
     };
     S.session = null;
     S.sessionNo = S.sessionNo % SESSIONS_PER_SET + 1;
@@ -444,7 +543,7 @@
     $('xpLevel').textContent = petName() + ' · Level ' + S.progress.level;
     $('xpText').textContent = Math.min(xpNow, XP_PER_LEVEL) + ' / ' + XP_PER_LEVEL + ' XP';
     $('xpFill').style.width = Math.min(100, (xpNow / XP_PER_LEVEL) * 100).toFixed(1) + '%';
-    const gained = coupled ? Math.max(0, S.dev.xp - (s.xp0 != null ? s.xp0 : S.dev.xp)) : Math.floor((s.xpSec || 0) / 60);
+    const gained = coupled ? (typeof S.dev.earned === 'number' ? S.dev.earned : Math.max(0, S.dev.xp - (s.xp0 != null ? s.xp0 : S.dev.xp))) : Math.floor((s.xpSec || 0) / 60);
     $('xpSoFar').textContent = s.mode === 'focus' ? '+' + gained + ' XP so far (' + Math.floor(s.focusedSec / 60) + ' focused min × ' + mult + ')' : '';
 
     $('ledgerPanel').hidden = brk || !showTime;
@@ -541,7 +640,7 @@
       $('nextSub').textContent = 'You ended early, so there is no intermission.';
       return;
     }
-    $('nextTitle').textContent = long ? 'Long rest · ' + LONG_BREAK + ' minutes' : 'Intermission · ' + c.brk + ' minutes';
+    $('nextTitle').textContent = long ? 'Long rest · ' + longRest(c.study || S.settings.study) + ' minutes' : 'Intermission · ' + c.brk + ' minutes';
     $('nextSub').textContent = long ? 'You finished a full set of four. Step away properly.' : 'Then session ' + ROMAN[S.sessionNo - 1] + ' of IV.' + (S.sessionNo === SESSIONS_PER_SET ? ' After that, a long rest.' : '');
   }
 
@@ -641,7 +740,7 @@
       if (m.t === 'camera_error') { toast('Camera: ' + (m.message || 'could not start') + '. The session continues without it.'); return; }
       if (m.t !== 'active') return;
       const hit = distractingMatch(m);
-      if (hit) startDrift('site', m.label || hit.charAt(0).toUpperCase() + hit.slice(1).replace('.com', ''));
+      if (hit) startDrift('site', m.label || SITE_LABELS[hit] || hit.charAt(0).toUpperCase() + hit.slice(1).replace('.com', ''));
       else if (S.session && S.session.drift && S.session.drift.kind === 'site') endDrift();
     };
     ws.onclose = () => { if (helper === ws) helper = null; setTimeout(connectHelper, 5000); };
@@ -889,7 +988,7 @@
   // known type, no extra fields, required fields present, and the device drops lines over 256 bytes.
   const OUT = {
     config: { req: [], keys: ['user', 'pet', 'time', 'tz'] },
-    start: { req: ['study', 'brk'], keys: ['study', 'brk'] },
+    start: { req: ['study', 'brk'], keys: ['study', 'brk'], ok: (m) => Number.isInteger(m.study) && m.study >= 15 && m.study <= 90 && m.study % 5 === 0 && Number.isInteger(m.brk) && m.brk >= 1 },
     drift: { req: ['active'], keys: ['active', 'label', 'kind'] },
     focus: { req: ['ts', 'focus', 'state', 'reason'], keys: ['ts', 'focus', 'state', 'reason', 'window', 'yaw', 'pitch', 'ear'] },
     peek: { req: [], keys: [] },
@@ -900,7 +999,7 @@
   const FOCUS_REASONS = ['absent', 'drowsy', 'looking_away', 'slouching', 'bad_window'];
   function send(obj) {
     const spec = OUT[obj.t];
-    const bad = !spec || Object.keys(obj).some((k) => k !== 't' && !spec.keys.includes(k)) || spec.req.some((k) => !(k in obj));
+    const bad = !spec || Object.keys(obj).some((k) => k !== 't' && !spec.keys.includes(k)) || spec.req.some((k) => !(k in obj)) || (spec.ok && !spec.ok(obj));
     const line = bad ? '' : JSON.stringify(obj) + '\n';
     if (bad || new TextEncoder().encode(line).length >= 256) { console.warn('Not sent (breaks the device schema):', obj); return; }
     if (!S.device.writer) return;
@@ -1159,7 +1258,7 @@ const HEART_SVG = '<svg viewBox="0 0 7 6" width="100%" height="100%" shape-rende
       if (!S.session) return;
       if (S.session.mode === 'focus') endSession(true); else { if (deviceBreak()) send({ t: 'end', scope: 'break' }); S.session = null; show('setup'); renderSetup(); }
     });
-    $('startBreakBtn').addEventListener('click', () => { const c = S.lastCard; startBreak(c && c.no === SESSIONS_PER_SET ? LONG_BREAK : (c ? c.brk : S.settings.brk), c && c.no === SESSIONS_PER_SET); });
+    $('startBreakBtn').addEventListener('click', () => { const c = S.lastCard; startBreak(c && c.no === SESSIONS_PER_SET ? longRest(c.study || S.settings.study) : (c ? c.brk : S.settings.brk), c && c.no === SESSIONS_PER_SET); });
     $('skipBreakBtn').addEventListener('click', () => {
       if (deviceBreak()) send({ t: 'end', scope: 'break' });
       if (S.session && S.session.mode === 'break') S.session = null;
@@ -1183,6 +1282,7 @@ const HEART_SVG = '<svg viewBox="0 0 7 6" width="100%" height="100%" shape-rende
       if (map[e.key.toLowerCase()]) demo(map[e.key.toLowerCase()]);
       if (e.key === ' ' && S.view === 'live') { e.preventDefault(); peek(); }
     });
+    wireDial();
     setDeviceChip();
     show('setup');
     renderSetup();
