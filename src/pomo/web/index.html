@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Study Buddy</title>
+<title>Pomo</title>
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
 <link rel="stylesheet" href="styles.css">
 </head>
@@ -29,7 +29,7 @@
 </svg>
 
 <header class="topbar">
-  <span class="brand">Study Buddy</span>
+  <button class="brand" id="brandBtn" type="button" title="Home">Pomo</button>
   <ol class="steps" aria-label="Progress">
     <li data-step="setup"><span class="pip" aria-hidden="true"></span>Setup<span class="sr" hidden> (done)</span></li>
     <li data-step="live"><span class="pip" aria-hidden="true"></span>Session<span class="sr" hidden> (done)</span></li>
@@ -41,8 +41,40 @@
 </header>
 
 <main>
+  <!-- ============ HOME ============ -->
+  <section id="view-home" class="view">
+    <section class="panel home">
+      <div class="home-pet">
+        <div class="porthole xl rivets"><canvas id="petHome" width="160" height="160" aria-hidden="true"></canvas></div>
+        <span class="label" id="homePetTitle"></span>
+      </div>
+      <div class="home-main">
+        <div class="home-body" id="homeWelcome" hidden>
+          <h1 class="display xl">Meet your Pomo.</h1>
+          <p class="lede">A clockwork pet that keeps your study timer out of sight and notices when your focus drifts.</p>
+          <div class="actions"><button id="homeNameBtn" class="btn primary" type="button">Name your Pomo</button></div>
+        </div>
+        <div class="home-body" id="homeReturning" hidden>
+          <h1 class="display xl" id="homeGreeting"></h1>
+          <div class="home-gauge">
+            <div class="rail-text"><span class="brass-hi" id="homeLevel"></span><span id="homeXp"></span></div>
+            <div class="rail"><div class="rail-fill" id="homeXpFill"></div></div>
+          </div>
+          <p class="home-readout" id="homeToday"></p>
+          <p class="home-readout" id="homeLast" hidden></p>
+          <div class="actions">
+            <button id="homeStartBtn" class="btn primary" type="button">Start studying</button>
+            <button id="homeCardBtn" class="btn ghost" type="button" hidden>Last time card</button>
+            <button id="homePetBtn" class="btn ghost" type="button">Customize pet</button>
+          </div>
+        </div>
+        <p class="home-device"><span class="lamp" id="homeLamp"></span><span id="homeDevice"></span></p>
+      </div>
+    </section>
+  </section>
+
   <!-- ============ SETUP ============ -->
-  <section id="view-setup" class="view">
+  <section id="view-setup" class="view" hidden>
     <div class="row" style="align-items: flex-start">
       <section class="panel grow">
         <h1 class="display">Before you begin</h1>

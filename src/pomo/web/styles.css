@@ -44,7 +44,11 @@ button { font: inherit; }
   display: flex; flex-wrap: wrap; gap: 16px; align-items: center; justify-content: space-between;
   border-bottom: 4px double var(--brass);
 }
-.brand { font-family: var(--display); font-size: 30px; color: var(--brass); }
+.brand {
+  font-family: var(--display); font-size: 30px; color: var(--brass);
+  min-height: 44px; padding: 0 4px; background: none; border: 0; cursor: pointer;
+}
+.brand[aria-disabled="true"] { cursor: default; }
 .steps {
   display: flex; align-items: center; margin: 0; padding: 0; list-style: none;
   font-family: var(--display); font-size: 18px; color: var(--muted);
@@ -430,4 +434,20 @@ main { max-width: 1200px; margin: 0 auto; padding: 28px 16px 96px; }
 @media (max-width: 700px) {
   .study-break.custom { flex-direction: column; align-items: flex-start; gap: 16px; }
   .study-break.custom .field { flex: none; width: 100%; }
+}
+
+/* ---------- Home: the instrument's front plate ---------- */
+.home { flex-direction: row; align-items: center; gap: 48px; padding: 40px 44px; }
+.home-pet { display: flex; flex-direction: column; align-items: center; gap: 12px; flex-shrink: 0; }
+.home-main { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 22px; }
+.home-body { display: flex; flex-direction: column; gap: 18px; }
+.home-body .lede { margin: 0; max-width: 34em; }
+.home-gauge { max-width: 600px; border-top: 1px solid var(--rim); padding-top: 14px; }
+.home-gauge .rail-text { margin: 0 0 8px; }
+.home-readout { margin: 0; font-size: 19px; color: var(--text-soft); }
+.home-device { margin: 0; display: flex; align-items: center; gap: 10px; border-top: 1px solid var(--rim); padding-top: 16px; font-size: 16px; color: var(--muted); }
+.home-device.awake { color: var(--text-soft); }
+.home .porthole.xl { width: 228px; height: 228px; } .home .porthole.xl canvas { width: 144px; height: 144px; } /* the pet stays large on Home, even in the compact layout */
+@media (max-width: 760px) {
+  .home { flex-direction: column; align-items: stretch; padding: 28px 22px; }
 }

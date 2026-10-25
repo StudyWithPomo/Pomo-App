@@ -1,4 +1,4 @@
-/* Study Buddy — laptop dashboard.
+/* Pomo — laptop dashboard.
    Plain JS, no build step. Serve this folder on localhost and open in Chrome or Edge
    (Web Serial and Idle Detection need a Chromium browser and a secure origin; localhost counts). */
 (function () {
@@ -72,7 +72,8 @@
   // ---------- Views ----------
   function show(view) {
     S.view = view;
-    for (const v of ['setup', 'live', 'card']) $('view-' + v).hidden = v !== view;
+    for (const v of ['home', 'setup', 'live', 'card']) $('view-' + v).hidden = v !== view;
+    $('brandBtn').setAttribute('aria-disabled', String(!!S.session)); // Home only between sessions
     // Progress markers, not links: earlier steps read as done, the current one is lit.
     const here = ['setup', 'live', 'card'].indexOf(view);
     document.querySelectorAll('.steps li').forEach((el, i) => {
@@ -236,6 +237,7 @@
     }
     StudyPet.drawPet($('petSetup'), petOpts(currentMood()));
     StudyPet.drawPet($('petLive'), petOpts(currentMood()));
+    StudyPet.drawPet($('petHome'), petOpts(currentMood()));
   }
 
   // ---------- Nixie tubes ----------
@@ -312,7 +314,7 @@
   }
   // Only the device knows who is in its study group; mult says whether the bonus is running
   function circleNote(mult, list, gone, s) {
-    if (!list.length && !gone.length) return 'No friends nearby. Other Study Buddy devices in range show up here.';
+    if (!list.length && !gone.length) return 'No friends nearby. Other Pomos in range show up here.';
     if (mult > 1) return 'The bonus holds while everyone stays focused.';
     const drifting = (s && s.drift) || list.some((f) => !f.focused) || (!demoOn() && S.dev && S.dev.focus === 'drift');
     if (drifting) return 'Paused: someone in the circle is drifting.';
@@ -451,6 +453,7 @@
       total: s.total, done, focusedSec, pct, focusedMin, mult, earned, penalty,
       study: s.study, heartDelta, leveled, before, test: !!(m && S.testTiming), events: s.events.slice(), minutes: minuteKinds(s, true), brk: s.brk, finished: null
     };
+    countToday();
     S.session = null;
     S.sessionNo = S.sessionNo % SESSIONS_PER_SET + 1;
     renderCard();
@@ -1185,11 +1188,59 @@
         break;
     }
   }
+  // ---------- Home ----------
+  // Sessions scored today in this browser, kept as { day: 'YYYY-MM-DD', n }
+  const todayKey = () => { const d = new Date(); return d.getFullYear() + '-' + two(d.getMonth() + 1) + '-' + two(d.getDate()); };
+  const sessionsToday = () => { const t = store.get('today', null); return t && t.day === todayKey() ? t.n : 0; };
+  function countToday() { store.set('today', { day: todayKey(), n: sessionsToday() + 1 }); }
+  const firstVisit = () => store.get('settings', null) === null; // nothing saved yet in this browser
+  function renderHome() {
+    const first = firstVisit();
+    $('homeWelcome').hidden = !first;
+    $('homeReturning').hidden = first;
+    $('homePetTitle').hidden = first; // a first visit shows no stats
+    $('homePetTitle').replaceChildren(...withNums([petName() + ' · Lv ', { n: S.progress.level }]));
+    if (!first) {
+      const h = new Date().getHours();
+      const part = h >= 5 && h < 12 ? 'Morning' : h >= 12 && h < 17 ? 'Afternoon' : 'Evening';
+      const who = (S.settings.user || '').trim();
+      $('homeGreeting').textContent = who ? part + ', ' + who + '.' : part + '.';
+      $('homeLevel').replaceChildren(...withNums(['To level ', { n: S.progress.level + 1 }]));
+      $('homeXp').replaceChildren(...withNums([{ n: S.progress.xp }, ' / ', { n: XP_PER_LEVEL }, ' XP']));
+      $('homeXpFill').style.width = Math.min(100, (S.progress.xp / XP_PER_LEVEL) * 100).toFixed(1) + '%';
+      $('homeToday').replaceChildren(...withNums(['Sessions today: ', { n: sessionsToday() }]));
+      const c = S.lastCard;
+      $('homeLast').hidden = !c;
+      $('homeCardBtn').hidden = !c;
+      if (c) {
+        $('homeLast').replaceChildren(...withNums(['Last: ', { n: c.pct }, '% focused, ', { n: Math.round(c.done / 60) }, ' min, ',
+          { n: (c.penalty ? '\u2212' + c.penalty : '+' + c.earned) }, ' XP']));
+      }
+    }
+    const awake = S.device.connected;
+    $('homeLamp').className = 'lamp' + (awake ? ' on' : '');
+    $('homeDevice').parentElement.classList.toggle('awake', awake);
+    $('homeDevice').textContent = awake ? 'Pomo is awake' : S.lost ? 'Pomo lost the link. Reconnect from the top right.' : 'Connect Pomo to begin';
+    StudyPet.drawPet($('petHome'), petOpts(currentMood()));
+  }
+  function goHome() {
+    if (S.session) return; // not mid-session
+    show('home');
+    renderHome();
+  }
+  // Leave Home for Setup, optionally landing on one field
+  function toSetup(fieldId) {
+    show('setup');
+    renderSetup();
+    if (fieldId) $(fieldId).focus();
+  }
+
   function setDeviceChip() {
     $('deviceLamp').className = 'lamp' + (S.device.connected ? ' on' : '');
     $('deviceText').textContent = S.device.connected ? 'Device coupled · USB' : S.lost ? 'Device lost · Reconnect' : 'Connect device';
     $('sendPetBtn').disabled = !S.device.connected;
     $('sentNote').textContent = S.device.connected ? '' : 'Connect the device to send.';
+    if (S.view === 'home') renderHome();
   }
 
   // ---------- Misc ----------
@@ -1360,11 +1411,17 @@ const HEART_SVG = '<svg viewBox="0 0 7 6" width="100%" height="100%" shape-rende
       if (e.key === ' ' && S.view === 'live') { e.preventDefault(); peek(); }
     });
     wireDial();
+    $('brandBtn').addEventListener('click', goHome);
+    $('homeStartBtn').addEventListener('click', () => toSetup('goal'));
+    $('homeNameBtn').addEventListener('click', () => toSetup('userName'));
+    $('homePetBtn').addEventListener('click', () => toSetup('petName'));
+    $('homeCardBtn').addEventListener('click', () => { if (S.lastCard && !S.session) show('card'); });
     setDeviceChip();
-    show('setup');
     renderSetup();
+    show('home');
+    renderHome();
     connectHelper();
-    setInterval(() => { tick(); linkWatch(); renderReady(); }, 1000);
+    setInterval(() => { tick(); linkWatch(); renderReady(); if (S.view === 'home') renderHome(); }, 1000);
     $('readyNextBtn').addEventListener('click', () => { S.readyDismissed = true; send({ t: 'end', scope: 'break' }); renderReady(); });
     $('readyFinishBtn').addEventListener('click', () => {
       S.readyDismissed = true;
