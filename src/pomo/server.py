@@ -23,6 +23,8 @@ from websockets.asyncio.server import broadcast, serve
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
 HOST = "127.0.0.1"
+# The Focus helper extension (extension/) has a fixed id because its manifest pins a public key.
+EXTENSION_ORIGIN = "chrome-extension://llpokpkaonmjajcghgjfklpdmbepijha"
 
 
 class _HTTPServer(ThreadingHTTPServer):
@@ -48,6 +50,7 @@ class Hub:
         self.ws_port = ws_port
         self._on_camera = on_camera
         self._clients: set = set()
+        self._helpers: set = set()  # clients that only report the active tab (the extension), not pages
         self._loop: asyncio.AbstractEventLoop | None = None
         self._httpd: ThreadingHTTPServer | None = None
         self._error: BaseException | None = None
@@ -92,7 +95,7 @@ class Hub:
 
         async def main() -> None:
             self._stop_event = asyncio.Event()
-            origins = [f"http://localhost:{self.http_port}", f"http://127.0.0.1:{self.http_port}"]
+            origins = [f"http://localhost:{self.http_port}", f"http://127.0.0.1:{self.http_port}", EXTENSION_ORIGIN]
             try:
                 async with serve(self._handle, HOST, self.ws_port, origins=origins):
                     ready.set()
@@ -116,7 +119,12 @@ class Hub:
                     continue
                 if isinstance(msg, dict) and msg.get("t") == "camera":
                     self._on_camera(bool(msg.get("on")))
+                elif isinstance(msg, dict) and msg.get("t") == "active":
+                    # From the Chrome extension: pass the active tab on to the dashboard(s).
+                    self._helpers.add(ws)
+                    broadcast(self._clients - {ws}, json.dumps(msg))
         finally:
             self._clients.discard(ws)
-            if not self._clients:  # page closed: never leave the camera running
+            self._helpers.discard(ws)
+            if not (self._clients - self._helpers):  # last page closed: never leave the camera running
                 self._on_camera(False)

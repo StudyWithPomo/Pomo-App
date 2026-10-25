@@ -54,6 +54,15 @@ Tests: `uv run pytest` (Windows: `.venv\Scripts\python -m pytest`)
 ## Dashboard
 Plain HTML/CSS/JS in `src/pomo/web`, no build step. Feature list: `docs/FEATURES.md`. Device protocol: `src/pomo/web/schema/pomo-device.schema.json`. The rules (breaks, XP, hearts) and the device protocol are documented in the original frontend README; they are unchanged.
 
+## Focus helper extension
+A small Chrome extension in `extension/` tells the dashboard which tab you are on, so visiting a distracting site (the dashboard's `DISTRACTING` list) counts as a drift. Optional; the dashboard works without it.
+
+1. Run the app (`python -m pomo`) and open Chrome (or Edge) at `chrome://extensions`.
+2. Turn on **Developer mode** (top right), choose **Load unpacked**, and pick this repo's `extension` folder.
+3. Keep the dashboard open. The extension connects by itself; reload it from `chrome://extensions` if you restart the app and it does not reconnect within a few seconds.
+
+It sends only the URL and title of the tab you are looking at (or "other" when Chrome is not the focused window), and only to `ws://localhost:8765`, which is the Pomo app on your own laptop. Nothing is stored or sent anywhere else. The app accepts it because the extension's id is fixed by the `key` in `extension/manifest.json`; other extensions are refused.
+
 ## Focus tracking
 - state: calibrating | focused | drifting | unfocused
 - reason: absent | drowsy | looking_away | slouching | bad_window | null

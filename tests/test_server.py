@@ -59,3 +59,35 @@ def test_rejects_foreign_origin(hub):
                 pass
 
     asyncio.run(go())
+
+
+def test_extension_relays_active_tab_without_echo(hub):
+    from pomo.server import EXTENSION_ORIGIN
+    page_origin = f"http://localhost:{hub.http_port}"
+    tab = {"t": "active", "url": "https://youtube.com/watch", "title": "Video"}
+
+    async def go():
+        async with connect(f"ws://127.0.0.1:{hub.ws_port}", origin=EXTENSION_ORIGIN) as ext:
+            async with connect(f"ws://127.0.0.1:{hub.ws_port}", origin=page_origin) as page:
+                await page.send(json.dumps({"t": "camera", "on": True}))
+                await asyncio.sleep(0.2)
+                await ext.send(json.dumps(tab))
+                await ext.send(json.dumps({"t": "keepalive"}))  # ignored, never relayed
+                assert json.loads(await asyncio.wait_for(page.recv(), 3)) == tab
+                with pytest.raises(asyncio.TimeoutError):
+                    await asyncio.wait_for(ext.recv(), 0.5)  # no echo to the sender
+                with pytest.raises(asyncio.TimeoutError):
+                    await asyncio.wait_for(page.recv(), 0.5)  # keepalive was not relayed
+            await asyncio.sleep(0.3)
+            assert hub.calls[-1] is False  # page closed while the extension stays connected -> camera off
+
+    asyncio.run(go())
+
+
+def test_rejects_other_extensions(hub):
+    async def go():
+        with pytest.raises(InvalidStatus):
+            async with connect(f"ws://127.0.0.1:{hub.ws_port}", origin="chrome-extension://" + "a" * 32):
+                pass
+
+    asyncio.run(go())
