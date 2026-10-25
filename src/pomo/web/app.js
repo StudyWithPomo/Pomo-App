@@ -51,6 +51,9 @@
     speed: 1,
     idleDetector: null,
     lovedUntil: 0, // petted: the love face until then (ms)
+    care: null, // Milestone E gears and hunger: null until the device reports them (today's firmware never does)
+    feedWait: 0, // a feed request is waiting for the device's pet reply (the 2 s timer)
+    feedUnsupported: false, // this connection's firmware didn't answer feed: feed on the device instead
     shhUntil: 0, // tapped during focus: the shh face until then
     play: { wound: 0, key: 0, shown: null, lastPlay: 0, lastRunDown: 0, dancing: false, danceAt: 0, gear: null, asleep: false, loveUntil: 0, line: '' }
   };
@@ -489,7 +492,7 @@
     const s = S.session;
     if (linkDown()) return 'sad';
     if (petted() && (!s || s.mode === 'break')) return 'love';
-    if (!s) return 'happy';
+    if (!s) return careMood() || 'happy';
     if (s.mode === 'break') return 'happy';
     if (hushed()) return 'shh';
     return s.drift ? 'annoyed' : 'focus';
@@ -635,14 +638,7 @@
     const card = $('timecard');
     card.classList.remove('print'); void card.offsetWidth; card.classList.add('print');
 
-    const words = ['Zero', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten'];
-    const tooShort = c.early && c.done < 60; // ended before a full minute: a % would read as a bug
-    $('verdict').textContent = tooShort ? 'Ended early.' : c.pct + '% focused.';
-    const worst = c.events.slice().sort((a, b) => b.len - a.len)[0];
-    const lapses = c.events.length;
-    $('verdictSub').textContent = Math.round(c.done / 60) + ' minutes, ' + (lapses ? (words[lapses] || lapses).toLowerCase() + ' lapse' + (lapses > 1 ? 's' : '') : 'no lapses') +
-      (c.penalty ? ', and ' + c.penalty + ' XP lost.' : ', ' + c.earned + ' XP' + (c.mult > 1 ? ' with your study circle' : '') + '.') +
-      (worst ? ' ' + (worst.kind === 'idle' ? 'Going idle' : worst.label) + ' cost you the most.' : '');
+    const { worst, tooShort } = renderCardLine(c);
 
       c.mood = c.pct >= 60 ? 'love' : c.pct >= PENALTY_BELOW ? 'happy' : 'annoyed';
       StudyPet.drawPet($('petCard'), petOpts(c.mood));
@@ -673,6 +669,21 @@
     }
     $('nextTitle').textContent = long ? 'Long rest · ' + longRest(c.study || S.settings.study) + ' minutes' : 'Intermission · ' + c.brk + ' minutes';
     $('nextSub').textContent = long ? 'You finished a full set of four. Step away properly.' : 'Then session ' + ROMAN[S.sessionNo - 1] + ' of IV.' + (S.sessionNo === SESSIONS_PER_SET ? ' After that, a long rest.' : '');
+  }
+
+  // The verdict and score line of a time card
+  function renderCardLine(c) {
+    const words = ['Zero', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten'];
+    const tooShort = c.early && c.done < 60; // ended before a full minute: a % would read as a bug
+    $('verdict').textContent = tooShort ? 'Ended early.' : c.pct + '% focused.';
+    const worst = c.events.slice().sort((a, b) => b.len - a.len)[0];
+    const lapses = c.events.length;
+    // The gears from the device's earned message, as Intermission says them (Firmware-Pomo docs/PET_PLAY_AND_CARE.md, "What the pet says")
+    const gears = c.gears == null ? '' : ', ' + (c.gears === 0 ? 'gears full' : '+' + c.gears + (c.gears === 1 ? ' gear' : ' gears'));
+    $('verdictSub').textContent = Math.round(c.done / 60) + ' minutes, ' + (lapses ? (words[lapses] || lapses).toLowerCase() + ' lapse' + (lapses > 1 ? 's' : '') : 'no lapses') +
+      (c.penalty ? ', and ' + c.penalty + ' XP lost' + gears + '.' : ', ' + c.earned + ' XP' + (c.mult > 1 ? ' with your study circle' : '') + gears + '.') +
+      (worst ? ' ' + (worst.kind === 'idle' ? 'Going idle' : worst.label) + ' cost you the most.' : '');
+    return { worst, tooShort };
   }
 
   // Brief burst + banner on the time card. The new accessory pops in mid-burst.
@@ -836,6 +847,9 @@
     S.device = { connected: true, port, writer: enc.writable.getWriter(), stop: null };
     S.lastRx = Date.now();
     S.armed = false;
+    S.feedUnsupported = false;
+    clearTimeout(S.feedWait);
+    S.feedWait = 0;
     setDeviceChip();
     sendConfig();
     readLoop(port);
@@ -890,6 +904,8 @@
       return;
     }
     S.dev = null;
+    S.care = null;
+    renderCare();
     S.circle = []; // back to the local engine; the demo drawer has the fake friends
     S.gone = [];
     setDeviceChip();
@@ -1061,7 +1077,8 @@
     focus: { req: ['ts', 'focus', 'state', 'reason'], keys: ['ts', 'focus', 'state', 'reason', 'window', 'yaw', 'pitch', 'ear'] },
     peek: { req: [], keys: [] },
     end: { req: ['scope'], keys: ['scope'] },
-    ping: { req: [], keys: [] }
+    ping: { req: [], keys: [] },
+    feed: { req: [], keys: [] }
   };
   const FOCUS_STATES = ['calibrating', 'focused', 'drifting', 'unfocused'];
   const FOCUS_REASONS = ['absent', 'drowsy', 'looking_away', 'slouching', 'bad_window'];
@@ -1135,6 +1152,7 @@
     S.dev = m;
     S.paused = m.paused === true;
     S.armed = true;
+    if (Number.isInteger(m.gears) || typeof m.hunger === 'string') updateCare({ gears: m.gears, hunger: m.hunger });
     const nowReady = m.phase === 'ready';
     if (nowReady && !S.wasReady) chime(); // once, when ready begins
     S.wasReady = nowReady;
@@ -1199,8 +1217,109 @@
       case 'circle':
         if (Array.isArray(m.friends)) onCircle(m.friends);
         break;
+      case 'pet': onPet(m); break;
     }
   }
+  // ---------- Pet care (Milestone E, prepared) ----------
+  // Everything here stays off until the device sends gears or hunger (Firmware-Pomo docs/PET_PLAY_AND_CARE.md, Part 2).
+  const HUNGER = ['full', 'content', 'peckish', 'hungry'];
+  // Idle face by hunger: full -> love, hungry -> hungry, otherwise none (the caller's default)
+  function careMood() {
+    if (!S.care) return null;
+    if (S.care.hunger === 'full') return 'love';
+    if (S.care.hunger === 'hungry') return 'hungry';
+    return null;
+  }
+  function updateCare(part) {
+    const c = S.care || { gears: 0, max: 12, hunger: 'content', fedAt: 0 };
+    if (Number.isInteger(part.gears)) c.gears = Math.max(0, Math.min(c.max, part.gears));
+    if (Number.isInteger(part.max) && part.max > 0) c.max = part.max;
+    if (HUNGER.includes(part.hunger)) c.hunger = part.hunger;
+    if (Number.isInteger(part.fedAt)) c.fedAt = part.fedAt;
+    S.care = c;
+    // a pet sitting idle in the Playground says the line for its new hunger
+    const p = S.play;
+    if (S.view === 'play' && !p.dancing && !p.gear && !p.wound && !p.asleep && Object.values(IDLE_LINES).includes(p.line)) p.line = idleLine();
+    renderCare();
+    drawPets();
+    if (S.view === 'home') renderHome();
+  }
+  // The device's pet message; feed attempts made on the device show in the Playground
+  // A fed, empty or stuffed event answers a waiting feed request; a fed event nobody here asked for
+  // is a feed on the device (knob or touch), shown here too. The gear count always comes from the message.
+  function onPet(m) {
+    const wasHungry = !!(S.care && S.care.hunger === 'hungry');
+    if (m.event === 'earned') gearsEarned(Number.isInteger(m.earned) ? m.earned : 0);
+    const answer = ['fed', 'empty', 'stuffed'].includes(m.event);
+    if (answer && S.feedWait) { clearTimeout(S.feedWait); S.feedWait = 0; }
+    updateCare({ gears: m.gears, max: m.max_gears, hunger: m.hunger, fedAt: m.fed_at });
+    if (S.view !== 'play' || !answer) return;
+    const p = S.play;
+    if (m.event === 'fed') {
+      const woke = playNoted();
+      if (p.gear || p.dancing) { // a gear already flying (or dancing): just the result
+        p.line = wasHungry ? "Oh, that's better!" : 'Crunchy! Thank you.';
+        p.loveUntil = Date.now() + AFTER_MS;
+      } else toss(woke, wasHungry);
+      renderPlay();
+      return;
+    }
+    p.line = m.event === 'empty' ? 'Out of gears! Finish a session to earn some.' : "I'm stuffed! Save it for later.";
+    sound(SOUNDS.SHH); // the device's low hum for a refused feed
+    p.lastPlay = Date.now();
+    renderPlay();
+  }
+  // The gears a completed session earned arrive just after its end: they join that time card's score line
+  function gearsEarned(n) {
+    const c = S.lastCard;
+    if (!c || c.gears != null || Date.now() - c.endedAt.getTime() > 15000) return;
+    c.gears = n;
+    const t = store.get('cards', null); // the shelf's copy of the card too
+    if (t && Array.isArray(t.list)) {
+      const saved = t.list.find((x) => x.id === c.endedAt.getTime());
+      if (saved) { saved.gears = n; store.set('cards', t); }
+    }
+    if (!S.viewCard) renderCardLine(c); // only the score line, so the card doesn't print again
+  }
+  // Ask the device to feed; the button waits for its pet reply. No reply in 2 s: this firmware
+  // doesn't know feed yet, so the button becomes "Feed on Pomo" for the rest of the connection.
+  const FEED_REPLY_MS = 2000;
+  function requestFeed() {
+    if (S.feedWait) return;
+    playNoted();
+    if (S.feedUnsupported || !S.device.connected) { renderFeedBtn(); return; }
+    send({ t: 'feed' });
+    S.feedWait = setTimeout(() => {
+      S.feedWait = 0;
+      S.feedUnsupported = true;
+      renderFeedBtn();
+    }, FEED_REPLY_MS);
+    renderFeedBtn();
+  }
+  function renderFeedBtn() {
+    const btn = $('feedBtn'), c = S.care, fallback = !!(c && S.feedUnsupported);
+    btn.disabled = !!S.feedWait;
+    btn.textContent = fallback ? 'Feed on Pomo' : 'Feed a gear';
+    btn.classList.toggle('dim', fallback || !!(c && c.gears <= 0));
+    $('feedHint').hidden = !fallback;
+  }
+  // The gears bars on Home and the Playground: a small gear, then a pip per gear the bar holds
+  function renderCare() {
+    const c = S.care;
+    for (const id of ['homeGears', 'playGears']) {
+      const bar = $(id);
+      bar.hidden = !c;
+      if (!c) continue;
+      if (!bar.firstChild) bar.innerHTML = '<span class="gear-icon">' + GEAR_FRAMES[0] + '</span><span class="pips"></span>';
+      const pips = bar.lastChild;
+      if (pips.children.length !== c.max) pips.replaceChildren(...Array.from({ length: c.max }, () => document.createElement('i')));
+      [...pips.children].forEach((pip, i) => pip.classList.toggle('on', i < c.gears));
+      bar.setAttribute('role', 'img');
+      bar.setAttribute('aria-label', 'Gears: ' + c.gears + ' of ' + c.max);
+    }
+    renderFeedBtn();
+  }
+
   // ---------- Home ----------
   // Today's time cards in this browser, kept as { day: 'YYYY-MM-DD', list } (dates as ISO strings)
   const todayKey = () => { const d = new Date(); return d.getFullYear() + '-' + two(d.getMonth() + 1) + '-' + two(d.getDate()); };
@@ -1292,6 +1411,8 @@
     const label = S.lost ? 'Reconnect Pomo' : 'Connect Pomo to begin';
     if ($('homeConnectBtn').textContent !== label) $('homeConnectBtn').textContent = label;
     $('homeSpeech').hidden = first;
+    $('homeFed').hidden = first || !S.care;
+    if (!first && S.care) $('homeFed').textContent = 'Last fed: ' + fedAgo(S.care.fedAt);
     if (!first) {
       const line = petSays();
       if ($('homeSpeech').textContent !== line) $('homeSpeech').textContent = line;
@@ -1332,6 +1453,7 @@
       const who = names.length === 1 ? names[0] : names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1];
       return who + (names.length === 1 ? ' is' : ' are') + ' nearby. Study together?';
     }
+    if (S.care && (S.care.hunger === 'hungry' || S.care.hunger === 'peckish')) return IDLE_LINES[S.care.hunger];
     const cards = todaysCards().reverse(); // newest first
     const proud = cards.find((c) => c.pct >= 80);
     if (proud) return 'That ' + proud.pct + '% session? Proud of you.';
@@ -1339,6 +1461,16 @@
     if (new Date().getHours() < 5) return "It's late. One short session, then sleep?";
     if (!S.device.connected) return "Plug me in and we'll get started.";
     return 'Ready when you are.';
+  }
+  // Status's "Last fed" wording (Firmware-Pomo docs/PET_PLAY_AND_CARE.md, "On screen"); fed_at 0 reads as unknown
+  function fedAgo(fedAt) {
+    if (!fedAt) return '\u2013';
+    const s = Date.now() / 1000 - fedAt;
+    if (s < 120) return 'just now';
+    if (s < 3600) return Math.floor(s / 60) + ' min ago';
+    if (s < 86400) return Math.floor(s / 3600) + ' h ago';
+    if (s < 172800) return 'yesterday';
+    return Math.floor(s / 86400) + ' days ago';
   }
   function goHome() {
     if (S.session) return; // not mid-session
@@ -1457,12 +1589,17 @@ const HEART_SVG = '<svg viewBox="0 0 7 6" width="100%" height="100%" shape-rende
     h.animate([{ opacity: 1 }, { opacity: 1, offset: 0.5 }, { opacity: 0 }], { duration: 900 }).onfinish = () => h.remove();
   }
   // Three hearts at the doc's offsets from the porthole's centre (x) and top (y), 120 ms apart
-  function tapHearts(porthole) {
+  // With 3 hearts all three start positions, with 2 the left and right, with 1 the middle (Firmware-Pomo docs/PET_PLAY_AND_CARE.md, "Hunger")
+  const HEART_STARTS = { 3: [[-22, 6], [2, 0], [18, 10]], 2: [[-22, 6], [18, 10]], 1: [[2, 0]] };
+  function tapHearts(porthole, count) {
     const r = porthole.getBoundingClientRect();
     if (!r.width) return; // not on screen
     const cx = r.left + r.width / 2;
-    [[-22, 6], [2, 0], [18, 10]].forEach(([dx, dy], i) => setTimeout(() => heartAt(cx + dx, r.top + dy), i * 120));
+    HEART_STARTS[count || 3].forEach(([dx, dy], i) => setTimeout(() => heartAt(cx + dx, r.top + dy), i * 120));
   }
+  // Taps give 3/3/2/1 hearts when full/content/peckish/hungry; 3 while the device hasn't reported hunger
+  const tapHeartCount = () => (S.care ? { full: 3, content: 3, peckish: 2, hungry: 1 }[S.care.hunger] || 3 : 3);
+  const hungry = () => !!(S.care && S.care.hunger === 'hungry');
   // One heart from a random spot: ±20 px of centre, 0-10 px below the porthole's top
   function strokeHeart(porthole) {
     const r = porthole.getBoundingClientRect();
@@ -1508,7 +1645,7 @@ const HEART_SVG = '<svg viewBox="0 0 7 6" width="100%" height="100%" shape-rende
       if (S.session && S.session.mode === 'focus') { hush(porthole); return; }
       loved(PET_FACE_MS);
       hop(porthole);
-      tapHearts(porthole);
+      tapHearts(porthole, tapHeartCount());
       sound(SOUNDS.PET);
       notePlay();
     });
@@ -1522,7 +1659,7 @@ const HEART_SVG = '<svg viewBox="0 0 7 6" width="100%" height="100%" shape-rende
       lastStroke = now;
       loved(PET_FACE_MS);
       squish(canvas);
-      strokeHeart(porthole);
+      if (!hungry()) strokeHeart(porthole); // a hungry pet purrs, without a heart
       sound(SOUNDS.PURR);
       notePlay();
     });
@@ -1573,6 +1710,9 @@ const HEART_SVG = '<svg viewBox="0 0 7 6" width="100%" height="100%" shape-rende
   const WIND_FULL = 12, RUN_DOWN_AFTER = 3000, RUN_DOWN_EVERY = 600, DANCE_MS = 3000, AFTER_MS = 1500;
   const FLIGHT_MS = 650, SLEEP_AFTER = 20000, HOLD_DELAY = 400, HOLD_REPEAT = 150;
   const IDLE_LINE = 'Wind my key, or toss me a gear!';
+  // The Playground's idle line by hunger (Firmware-Pomo docs/PET_PLAY_AND_CARE.md, Part 2 "What the pet says")
+  const IDLE_LINES = { full: "I'm stuffed! Wind me up instead?", content: IDLE_LINE, peckish: 'A gear would be lovely...', hungry: "My tummy's ticking... got a gear?" };
+  const idleLine = () => (S.care && IDLE_LINES[S.care.hunger]) || IDLE_LINE;
   const gearSvg = (rects) => '<svg viewBox="0 0 7 7" width="21" height="21" shape-rendering="crispEdges" aria-hidden="true"><g fill="currentColor">' +
     rects.map(([x, y, w, h]) => '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '"/>').join('') + '</g></svg>';
   // The gear's two tumbling frames, 7x7 (Feeding)
@@ -1587,7 +1727,7 @@ const HEART_SVG = '<svg viewBox="0 0 7 6" width="100%" height="100%" shape-rende
     const p = S.play, now = Date.now();
     if (p.dancing || now < p.loveUntil || petted()) return 'love';
     if (p.asleep) return 'sleep';
-    return 'happy';
+    return careMood() || 'happy';
   }
   function renderPlay() {
     const p = S.play;
@@ -1619,7 +1759,7 @@ const HEART_SVG = '<svg viewBox="0 0 7 6" width="100%" height="100%" shape-rende
     const p = S.play;
     p.lastPlay = Date.now();
     p.asleep = false;
-    if (!p.wound && !p.dancing) p.line = IDLE_LINE;
+    if (!p.wound && !p.dancing) p.line = idleLine();
     show('play');
     renderPlay();
     playLoop();
@@ -1641,8 +1781,9 @@ const HEART_SVG = '<svg viewBox="0 0 7 6" width="100%" height="100%" shape-rende
     const p = S.play;
     p.dancing = true;
     p.danceAt = Date.now();
-    p.line = 'Wheee!';
-    tapHearts(playPorthole());
+    p.tired = hungry(); // a hungry pet dances 2 turns, without hearts
+    p.line = p.tired ? 'Wheee... huff...' : 'Wheee!';
+    if (!p.tired) tapHearts(playPorthole());
     sound(SOUNDS.DANCE);
     renderPlay();
     playLoop();
@@ -1655,8 +1796,8 @@ const HEART_SVG = '<svg viewBox="0 0 7 6" width="100%" height="100%" shape-rende
     p.shown = null;
     $('petPlay').style.transform = '';
     playPorthole().style.transform = '';
-    tapHearts(playPorthole());
-    p.line = 'Again! Again!';
+    if (!p.tired) tapHearts(playPorthole());
+    p.line = p.tired ? 'Phew... a gear would help.' : 'Again! Again!';
     p.loveUntil = Date.now() + AFTER_MS;
     p.lastPlay = Date.now();
     renderPlay();
@@ -1665,7 +1806,14 @@ const HEART_SVG = '<svg viewBox="0 0 7 6" width="100%" height="100%" shape-rende
   function feed() {
     const p = S.play;
     if (S.view !== 'play' || p.dancing || p.gear) return;
+    if (S.care) { requestFeed(); return; } // the device owns the gears and decides every feed
     const woke = playNoted();
+    toss(woke, false);
+  }
+  // The gear's flight to the pet and the catch: a free local feed, or a feed the device reports
+  function toss(woke, hungry) {
+    const p = S.play;
+    p.hungryToss = hungry;
     if (!woke) p.line = 'Ooh, a gear!';
     sound(SOUNDS.TOSS);
     const from = $('feedBtn').getBoundingClientRect(), pet = $('petPlay').getBoundingClientRect();
@@ -1685,7 +1833,8 @@ const HEART_SVG = '<svg viewBox="0 0 7 6" width="100%" height="100%" shape-rende
   function caught() {
     const p = S.play;
     squish($('petPlay'));
-    p.line = 'Crunchy! Thank you.';
+    p.line = p.hungryToss ? "Oh, that's better!" : 'Crunchy! Thank you.';
+    p.hungryToss = false;
     p.loveUntil = Date.now() + AFTER_MS;
     p.lastPlay = Date.now();
     sound(SOUNDS.CRUNCH);
@@ -1712,7 +1861,7 @@ const HEART_SVG = '<svg viewBox="0 0 7 6" width="100%" height="100%" shape-rende
         const t = now - p.danceAt;
         if (t >= DANCE_MS) endDance();
         else {
-          const angle = (t * 360 * 3 / DANCE_MS) % 360, rad = angle * Math.PI / 180;
+          const angle = (t * 360 * (p.tired ? 2 : 3) / DANCE_MS) % 360, rad = angle * Math.PI / 180;
           if (!reducedMotion()) {
             $('petPlay').style.transform = 'scaleX(' + Math.cos(rad).toFixed(3) + ')';
             playPorthole().style.transform = 'translateY(' + (-Math.abs(Math.sin(2 * rad)) * 6).toFixed(1) + 'px)';
@@ -1727,7 +1876,7 @@ const HEART_SVG = '<svg viewBox="0 0 7 6" width="100%" height="100%" shape-rende
           p.wound--;
           p.key = (p.key + 3) % 4;
           p.lastRunDown = now;
-          if (!p.wound) p.line = IDLE_LINE;
+          if (!p.wound) p.line = idleLine();
           renderPlay();
         }
         // 20 s with nobody playing, nothing wound and no gear in the air: asleep

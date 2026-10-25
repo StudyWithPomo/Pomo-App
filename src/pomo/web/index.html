@@ -44,11 +44,13 @@
   <!-- ============ HOME ============ -->
   <section id="view-home" class="view">
     <section class="panel home">
+      <div class="gears-bar" id="homeGears" hidden></div>
       <div class="home-top">
         <div class="home-pet">
           <div class="porthole xl rivets"><canvas id="petHome" width="160" height="160" aria-hidden="true"></canvas></div>
           <span class="label" id="homePetTitle"></span>
           <p class="italic home-speech" id="homeSpeech" aria-live="polite" hidden></p>
+          <p class="hint" id="homeFed" hidden></p>
         </div>
         <div class="home-main">
           <div class="home-body" id="homeWelcome" hidden>
@@ -87,6 +89,7 @@
   <!-- ============ PLAYGROUND ============ -->
   <section id="view-play" class="view" hidden>
     <section class="panel play">
+      <div class="gears-bar" id="playGears" hidden></div>
       <div class="porthole xl rivets"><canvas id="petPlay" width="160" height="160" aria-hidden="true"></canvas></div>
       <div class="play-side">
         <h1 class="display sm">Playground</h1>
@@ -101,6 +104,7 @@
           <button id="playBackBtn" class="btn ghost" type="button">Back</button>
         </div>
         <p class="hint">Hold Wind, or press Up, Right or Space, to wind the key. Tap or stroke the pet.</p>
+        <p class="hint" id="feedHint" hidden>Feed on the device for now; the gear count follows.</p>
       </div>
     </section>
   </section>

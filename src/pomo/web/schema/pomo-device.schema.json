@@ -12,11 +12,13 @@
     { "$ref": "#/$defs/peek" },
     { "$ref": "#/$defs/end_laptop" },
     { "$ref": "#/$defs/ping" },
+    { "$ref": "#/$defs/feed" },
     { "$ref": "#/$defs/hello" },
     { "$ref": "#/$defs/start_device" },
     { "$ref": "#/$defs/state" },
     { "$ref": "#/$defs/end_device" },
-    { "$ref": "#/$defs/circle" }
+    { "$ref": "#/$defs/circle" },
+    { "$ref": "#/$defs/pet" }
   ],
   "$defs": {
     "config": {
@@ -144,6 +146,13 @@
         "scope": { "enum": ["session", "break"] }
       }
     },
+    "feed": {
+      "description": "Laptop -> device. Needs firmware support (planned with Milestone E): asks the device to feed the pet one gear, as if fed on the device. The device decides and answers with a pet message whose event is fed, empty or stuffed; the laptop never changes the gear count itself. Firmware without it ignores the line. No fields.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t"],
+      "properties": { "t": { "const": "feed" } }
+    },
     "ping": {
       "description": "Laptop -> device. Heartbeat, sent every 2 s while the laptop is coupled. The firmware has no handler for it: like any JSON line with a string t it only marks the link as seen. The device does not pause when the laptop goes silent. No fields.",
       "type": "object",
@@ -224,6 +233,8 @@
         },
         "drift_s": { "type": "integer", "minimum": 0, "description": "Seconds the current drift has been active." },
         "earned": { "type": "integer", "minimum": 0, "description": "Live XP earned so far in the running study session. Sent only while phase is study." },
+        "gears": { "type": "integer", "minimum": 0, "maximum": 12, "description": "Milestone E: gears held." },
+        "hunger": { "enum": ["full", "content", "peckish", "hungry"], "description": "Milestone E: the pet's hunger level." },
         "mult": {
           "type": "integer",
           "minimum": 1,
@@ -257,6 +268,21 @@
           "type": "boolean",
           "description": "True when the session ended early (partial last minute not counted)."
         }
+      }
+    },
+    "pet": {
+      "description": "Device -> laptop. Milestone E (Firmware-Pomo docs/PET_PLAY_AND_CARE.md, Part 2 'Protocol additions'). Sent right after hello, whenever the hunger level changes, after every scored session that ran to the end (event earned), and on every feed attempt.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t", "gears", "max_gears", "hunger", "fed_at", "event"],
+      "properties": {
+        "t": { "const": "pet" },
+        "gears": { "type": "integer", "minimum": 0, "maximum": 12, "description": "Gears held." },
+        "max_gears": { "type": "integer", "minimum": 1, "description": "The cap (12)." },
+        "hunger": { "enum": ["full", "content", "peckish", "hungry"] },
+        "fed_at": { "type": "integer", "minimum": 0, "description": "Unix seconds, or 0 if never or unknown." },
+        "event": { "enum": ["hello", "earned", "fed", "empty", "stuffed", "hunger"], "description": "Why it was sent; hunger means the level changed." },
+        "earned": { "type": "integer", "minimum": 0, "description": "Only with event earned: gears this session added after the cap (0 when the bar was full; the firmware leaves the field out then)." }
       }
     },
     "circle": {
