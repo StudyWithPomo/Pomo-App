@@ -49,6 +49,7 @@ button { font: inherit; }
   min-height: 44px; padding: 0 4px; background: none; border: 0; cursor: pointer;
 }
 .brand[aria-disabled="true"] { cursor: default; }
+.brand:not([aria-disabled="true"]):hover, .brand:not([aria-disabled="true"]):focus-visible { text-decoration: underline; text-underline-offset: 6px; text-decoration-thickness: 2px; }
 .steps {
   display: flex; align-items: center; margin: 0; padding: 0; list-style: none;
   font-family: var(--display); font-size: 18px; color: var(--muted);
