@@ -947,6 +947,13 @@
   function linkWatch() {
     if (S.armed && S.dev && BUSY_PHASES.includes(S.dev.phase) && deviceSessionRunning() && Date.now() - S.lastRx > 6000) linkLost();
   }
+  // USB only when a vendor id is present; on Windows a paired Bluetooth SPP device is a plain COM port with no ids
+  function transportOf(info) {
+    return info && info.usbVendorId != null ? 'USB' : 'Bluetooth';
+  }
+  function portTransport(port) {
+    try { return transportOf(port && port.getInfo()); } catch (e) { return transportOf(null); }
+  }
   // Reopen the port after a loss. Button click: may ask which port. Plug-in event: only already-allowed ports.
   // Same device as the one we lost: USB vendor/product id, or the Bluetooth service class id.
   function samePort(p, info) {
@@ -1071,7 +1078,7 @@
     $('linkLostTitle').textContent = petName() + ' lost the device';
     // Over Bluetooth the board stays powered and keeps timing; over USB (no battery) it usually lost power
     if (S.lost) {
-      $('linkLostSub').textContent = S.lost.info.bluetoothServiceClassId != null
+      $('linkLostSub').textContent = transportOf(S.lost.info) === 'Bluetooth'
         ? 'Pomo paused your session. Reconnect to pick up where you left off.' // the firmware pauses study after 6 s without the laptop
         : "Pomo lost power or the cable came loose. Plug it back in; if it restarted, you'll start a fresh session.";
     }
@@ -1570,7 +1577,7 @@
 
   function setDeviceChip() {
     $('deviceLamp').className = 'lamp' + (S.device.connected ? ' on' : '');
-    $('deviceText').textContent = S.device.connected ? 'Device coupled · USB' : S.lost ? 'Device lost · Reconnect' : 'Connect device';
+    $('deviceText').textContent = S.device.connected ? 'Device coupled · ' + portTransport(S.device.port) : S.lost ? 'Device lost · Reconnect' : 'Connect device';
     if (!S.device.connected) { S.lookSync = false; clearTimeout(S.lookWait); }
     renderSync();
     if (S.view === 'home') renderHome();
