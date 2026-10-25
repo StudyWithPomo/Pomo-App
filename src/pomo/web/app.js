@@ -32,7 +32,9 @@
     sessionNo: 1,
     session: null,
     lastCard: null,
-    circle: demoCircle(),
+    circle: [], // friends from the device's circle message
+    fake: demoCircle(), // demo friends, shown only while the demo drawer is open (F toggles one)
+    gone: [], // friends who dropped out of range during this set: [{ name }]
     device: { connected: false, port: null, writer: null },
     dev: null, // latest 'state' message from the device (it owns the clock, XP and level while coupled)
     lost: null, // set while the link dropped mid-session: { info }; the session is frozen, not ended
@@ -137,7 +139,7 @@
     $('breakRule').textContent = 'Between a fifth and a third of study time: ' + bMin + '–' + bMax + ' min for ' + st.study + ' min.' + (st.study === 25 && st.brk === 5 ? ' Classic Pomodoro.' : '');
     $('beginBtn').replaceChildren(...withNums(['Begin · ', { n: st.study }, ' min']));
     const mult = multiplier();
-    $('circleHint').replaceChildren(...withNums(['then ' + ([8, 11, 18].includes(st.brk) ? 'an ' : 'a '), { n: st.brk }, ' min break · Session ' + ROMAN[S.sessionNo - 1] + ' of IV'].concat(S.circle.length ? [' · Study circle: ' + S.circle.map((f) => f.name).join(' and ') + ', ', { n: mult }, '× XP'] : [])));
+    $('circleHint').replaceChildren(...withNums(['then ' + ([8, 11, 18].includes(st.brk) ? 'an ' : 'a '), { n: st.brk }, ' min break · Session ' + ROMAN[S.sessionNo - 1] + ' of IV'].concat(circleShown().length ? [' · Study circle: ' + circleShown().map((f) => f.name).join(' and ') + ', ', { n: mult }, '× XP'] : [])));
 
     $('bodyChips').replaceChildren(...[['bot', 'Clockwork bot'], ['cat', 'Cat'], ['dog', 'Dog']].map(([k, l]) => chip(l, st.body === k, () => { st.body = k; petChanged(); }, 'word')));
     $('faceChips').replaceChildren(...[['plain', 'Plain'], ['monocle', 'Monocle']].map(([k, l]) => chip(l, st.face === k, () => { st.face = k; petChanged(); }, 'word')));
@@ -295,12 +297,26 @@
   }
 
   // ---------- Session engine ----------
+  // The demo drawer (D) swaps in fake friends, so linked play can be shown without a second device
+  const demoOn = () => !$('demo').hidden;
+  const circleShown = () => (demoOn() ? S.fake : S.circle);
   function multiplier() {
+    if (demoOn()) {
+      const f = S.fake;
+      if (!f.length || f.some((x) => !x.focused)) return 1; // bonus pauses while anyone drifts
+      return Math.max(1, Math.min(MAX_MULT, f.length));
+    }
     if (S.device.connected && S.dev) return S.dev.mult;
-    const focused = S.circle.filter((f) => f.focused).length;
-    if (!S.circle.length) return 1;
-    if (focused < S.circle.length) return 1; // bonus pauses while anyone drifts
-    return Math.max(1, Math.min(MAX_MULT, S.circle.length));
+    return 1;
+  }
+  // Only the device knows who is in its study group; mult says whether the bonus is running
+  function circleNote(mult, list, gone, s) {
+    if (!list.length && !gone.length) return 'No friends nearby. Other Study Buddy devices in range show up here.';
+    if (mult > 1) return 'The bonus holds while everyone stays focused.';
+    const drifting = (s && s.drift) || list.some((f) => !f.focused) || (!demoOn() && S.dev && S.dev.focus === 'drift');
+    if (drifting) return 'Paused: someone in the circle is drifting.';
+    if (gone.length) return 'Out of range. The bonus waits until they are back.';
+    return 'No bonus yet. Invite a friend from the Circle screen on the device to study together.';
   }
 
   function startSession() {
@@ -529,15 +545,20 @@
     $('circlePanel').hidden = brk;
     const mult = multiplier();
     $('multiplier').textContent = mult + '× XP';
-    $('circleNote').textContent = !S.circle.length ? 'No friends nearby. Their devices appear here when they start a session.' :
-      mult > 1 ? 'The bonus holds while everyone stays focused.' : 'Paused: someone in the circle is drifting.';
-    $('friends').replaceChildren(...S.circle.map((f) => {
+    const list = circleShown(), gone = demoOn() ? [] : S.gone;
+    $('circleNote').textContent = circleNote(mult, list, gone, s);
+    const friendRow = (lamp, name, status, cls) => {
       const li = document.createElement('li');
-      li.innerHTML = '<span class="lamp ' + (f.focused ? 'on' : 'off') + '"></span><span class="who"></span><span></span>';
-      li.children[1].textContent = f.name;
-      li.children[2].textContent = f.focused ? 'Focused' : 'Drifting';
+      if (cls) li.className = cls;
+      li.innerHTML = '<span class="lamp' + (lamp ? ' ' + lamp : '') + '"></span><span class="who"></span><span></span>';
+      li.children[1].textContent = name;
+      li.children[2].textContent = status;
       return li;
-    }));
+    };
+    // A friend's pct is 0 while they study, so a pct means they aren't studying right now
+    $('friends').replaceChildren(...list.map((f) => friendRow(f.focused ? 'on' : 'off', f.name,
+      !demoOn() && f.pct > 0 ? 'Not studying · last ' + f.pct + '%' : f.focused ? 'Focused' : 'Drifting')),
+      ...gone.map((g) => friendRow('', g.name, 'Out of range', 'gone')));
     const coupled = S.device.connected && S.dev;
     const xpNow = coupled ? S.progress.xp : S.progress.xp + Math.floor(s.xpSec ? s.xpSec / 60 : 0);
     $('xpLevel').textContent = petName() + ' · Level ' + S.progress.level;
@@ -616,15 +637,7 @@
     $('cardXpFill').style.width = ((S.progress.xp / XP_PER_LEVEL) * 100).toFixed(1) + '%';
     $('cardToNext').textContent = (XP_PER_LEVEL - S.progress.xp) + ' XP to Level ' + (S.progress.level + 1);
 
-    const board = [{ name: 'You', pct: c.pct, me: true }].concat(S.circle.map((f, i) => ({ name: f.name, pct: f.pct != null ? f.pct : [94, 88, 91][i % 3] })));
-    board.sort((a, b) => b.pct - a.pct);
-    $('board').replaceChildren(...board.map((p) => {
-      const li = document.createElement('li');
-      li.innerHTML = '<span class="who' + (p.me ? ' me' : '') + '"></span><span class="bar"><i style="width:' + p.pct + '%"></i></span><span class="pct">' + p.pct + '%</span>';
-      li.firstChild.textContent = p.name;
-      return li;
-    }));
-    $('board').parentElement.hidden = !S.circle.length;
+    renderBoard();
 
     $('cardGoal').textContent = c.goal;
     renderFinish();
@@ -671,6 +684,26 @@
     banner.classList.remove('go'); void banner.offsetWidth;
     if (!still) banner.classList.add('go');
     setTimeout(() => { banner.hidden = true; burst.replaceChildren(); }, 1400);
+  }
+
+  // The circle's cards: real friends' last scored session from the device (0 while they're still
+  // studying, shown as a dash until their result arrives); the demo drawer keeps the made-up ones.
+  function renderBoard() {
+    const c = S.lastCard;
+    if (!c) return;
+    const fake = demoOn();
+    const board = [{ name: 'You', pct: c.pct, me: true }].concat(circleShown().map((f, i) =>
+      ({ name: f.name, pct: fake ? (f.pct != null ? f.pct : [94, 88, 91][i % 3]) : (f.pct > 0 ? f.pct : null) })));
+    board.sort((a, b) => (b.pct == null ? -1 : b.pct) - (a.pct == null ? -1 : a.pct));
+    $('board').replaceChildren(...board.map((p) => {
+      const li = document.createElement('li');
+      const w = p.pct == null ? 0 : p.pct;
+      li.innerHTML = '<span class="who' + (p.me ? ' me' : '') + '"></span><span class="bar"><i style="width:' + w + '%"></i></span><span class="pct">' + (p.pct == null ? '—' : p.pct + '%') + '</span>';
+      li.firstChild.textContent = p.name;
+      if (p.pct == null) li.title = 'Still studying';
+      return li;
+    }));
+    $('board').parentElement.hidden = board.length < 2;
   }
 
   function renderFinish() {
@@ -768,6 +801,7 @@
       const port = await navigator.serial.requestPort();
       await attachPort(port);
       S.circle = []; // the real circle arrives from the device
+      S.gone = [];
       renderSetup();
     } catch (e) { toast('Could not connect: ' + (e.message || e)); }
   }
@@ -838,7 +872,8 @@
       return;
     }
     S.dev = null;
-    S.circle = demoCircle(); // back to the local engine and demo circle
+    S.circle = []; // back to the local engine; the demo drawer has the fake friends
+    S.gone = [];
     setDeviceChip();
     renderSetup();
     if (S.view === 'live') renderLive();
@@ -965,7 +1000,8 @@
     S.lost = null; S.paused = false; S.dev = null;
     if (S.session && S.session.mode === 'focus') setCamera(false);
     S.session = null;
-    S.circle = demoCircle();
+    S.circle = [];
+    S.gone = [];
     setDeviceChip();
     show('setup');
     renderSetup();
@@ -1069,7 +1105,7 @@
     if (nowReady && !S.wasReady) chime(); // once, when ready begins
     S.wasReady = nowReady;
     if (!nowReady) S.readyDismissed = false;
-    if (m.phase === 'idle') { S.testTiming = false; S.sessionNo = 1; } // the firmware's goIdle resets the set
+    if (m.phase === 'idle') { S.testTiming = false; S.sessionNo = 1; S.gone = []; } // the firmware's goIdle resets the set
     applyDeviceProgress(m.xp, m.level);
     if (S.recon && m.phase === 'idle') { endLostSession(false); return; } // it restarted: nothing to resume
     if (S.recon) settleReconnect(); else maybeResumed();
@@ -1101,6 +1137,19 @@
     }
     endSession(m.early, m);
   }
+  // The device lists every Pomo in range. One that vanishes mid-set stays as a greyed "Out of range"
+  // row until it comes back or the set ends; the multiplier follows the device's state.mult.
+  function onCircle(friends) {
+    const next = friends.map((f) => ({ name: String(f.name).slice(0, 10), focused: !!f.focused, pct: Number.isInteger(f.pct) ? f.pct : 0 }));
+    if (S.session) {
+      for (const f of S.circle) if (!next.some((n) => n.name === f.name) && !S.gone.some((g) => g.name === f.name)) S.gone.push({ name: f.name });
+    }
+    S.gone = S.gone.filter((g) => !next.some((n) => n.name === g.name));
+    S.circle = next;
+    renderSetup();
+    if (S.view === 'live') renderLive();
+    if (S.view === 'card') renderBoard();
+  }
   function onDevice(m) {
     switch (m.t) {
       case 'hello':
@@ -1110,7 +1159,7 @@
       case 'state': onDeviceState(m); break;
       case 'end': onDeviceEnd(m); break;
       case 'circle':
-        if (Array.isArray(m.friends)) { S.circle = m.friends.map((f) => ({ name: String(f.name).slice(0, 10), focused: !!f.focused, pct: f.pct })); renderSetup(); if (S.view === 'live') renderLive(); }
+        if (Array.isArray(m.friends)) onCircle(m.friends);
         break;
     }
   }
@@ -1167,10 +1216,11 @@
   function demo(action) {
     const s = S.session;
     if (linkDown()) { toast('The session is paused until the device is back.'); return; }
-    if (S.device.connected && (action === 'fast' || action === 'friend' || action === 'finish')) { toast('The device owns the clock and the circle while it is coupled.'); return; }
+    if (action === 'friend' && !demoOn()) { toast('Open the demo drawer (D) to use the fake friends.'); return; }
+    if (S.device.connected && (action === 'fast' || action === 'finish')) { toast('The device owns the clock while it is coupled.'); return; }
     if (action === 'fast') { S.speed = S.speed === 1 ? 30 : 1; toast(S.speed === 1 ? 'Normal speed' : 'Speed ×30'); return; }
     if (action === 'friend') {
-      const f = S.circle[1] || S.circle[0];
+      const f = S.fake[1] || S.fake[0];
       if (f) { f.focused = !f.focused; toast(f.name + (f.focused ? ' is focused again' : ' is drifting')); }
       if (S.view === 'live') renderLive();
       return;
@@ -1276,6 +1326,9 @@ const HEART_SVG = '<svg viewBox="0 0 7 6" width="100%" height="100%" shape-rende
       if (e.target.closest('input')) return;
       if (e.key.toLowerCase() === 'd' && !e.ctrlKey && !e.metaKey && !e.altKey) {
         $('demo').hidden = !$('demo').hidden;
+        renderSetup(); // the circle switches between real and fake friends
+        if (S.view === 'live') renderLive();
+        if (S.view === 'card') renderBoard();
         return;
       }
       const map = { y: 'site', i: 'idle', f: 'friend', s: 'fast', e: 'finish' };
