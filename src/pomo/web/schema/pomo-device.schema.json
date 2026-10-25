@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "pomo-device-protocol",
   "title": "Study Buddy: laptop <-> ESP32 device protocol",
-  "description": "JSON Lines, one JSON object per line, 115200 baud. Transport is USB serial now and Bluetooth SPP later; every outgoing line is written to all transports and every incoming line feeds one shared handler. Both ends ignore non-JSON lines, so debug prints on the same link are safe. The device assembler drops lines over 256 bytes.\n\nMessage directions: laptop -> device: config, start, drift, focus, peek, feed, end, ping. Device -> laptop: hello, start, state, end, circle — the device reports only relevant session changes, never raw knob input. The two 'start' pairs and the two 'end' pairs share one t on opposite directions; they are distinguished by their fields (see defs).\n\nOwnership: the laptop is the source of truth for camera focus (PomoServer) and the session goal. The device is the source of truth for session state, XP, level and pet identity, so level/xp/hearts are never sent laptop -> device. The same goes for the pet's gears and hunger: the laptop can ask the device to feed the pet (feed), and the device decides and reports the result.",
+  "description": "JSON Lines, one JSON object per line, 115200 baud. Transport is USB serial now and Bluetooth SPP later; every outgoing line is written to all transports and every incoming line feeds one shared handler. Both ends ignore non-JSON lines, so debug prints on the same link are safe. The device assembler drops lines over 256 bytes.\n\nMessage directions: laptop -> device: config, start, drift, focus, peek, feed, end, ping. Device -> laptop: hello, look, start, state, end, circle — the device reports only relevant session changes, never raw knob input. The two 'start' pairs and the two 'end' pairs share one t on opposite directions; they are distinguished by their fields (see defs).\n\nOwnership: the laptop is the source of truth for camera focus (PomoServer) and the session goal. The device is the source of truth for session state, XP, level and pet identity, so level/xp/hearts are never sent laptop -> device. The same goes for the pet's gears and hunger: the laptop can ask the device to feed the pet (feed), and the device decides and reports the result. The pet's look is two-way: the laptop may set it in config, and the device always reports what it actually shows in look (after hello, on every change, and as the confirmation of a config that changed it).",
   "type": "object",
   "oneOf": [
     { "$ref": "#/$defs/config" },
@@ -14,6 +14,7 @@
     { "$ref": "#/$defs/end_laptop" },
     { "$ref": "#/$defs/ping" },
     { "$ref": "#/$defs/hello" },
+    { "$ref": "#/$defs/look" },
     { "$ref": "#/$defs/start_device" },
     { "$ref": "#/$defs/state" },
     { "$ref": "#/$defs/end_device" },
@@ -167,6 +168,19 @@
       "properties": {
         "t": { "const": "hello" },
         "fw": { "type": "string" }
+      }
+    },
+    "look": {
+      "description": "Device -> laptop. The pet's look as the device shows it, in the same field names and values as config's pet. The device is the source of truth: show this, not what was last sent in config. Sent right after hello, whenever the look changes on the device (the Wardrobe), and after a config that changed the look, as its confirmation (a config that changed nothing gets no look). Several fields changing at once give one look. Always all four fields.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t", "name", "body", "face", "color"],
+      "properties": {
+        "t": { "const": "look" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 10 },
+        "body": { "enum": ["bot", "cat", "dog"] },
+        "face": { "enum": ["plain", "monocle"] },
+        "color": { "enum": ["brass", "copper", "pewter", "verdigris"] }
       }
     },
     "start_device": {
