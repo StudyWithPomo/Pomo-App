@@ -620,6 +620,16 @@
   }
   function setCamera(on) { sendHelper({ t: 'camera', on }); }
 
+  // A page URL is matched on its host only ('box.com' or a "Reddit API docs" title must not trip 'x.com' / 'reddit');
+  // without a usable URL (desktop-app helpers, blank tabs) the title and app name are searched instead.
+  function distractingMatch(m) {
+    let host = '';
+    try { host = new URL(m.url).hostname.toLowerCase(); } catch (e) { /* no usable URL */ }
+    if (host) return DISTRACTING.find((d) => (d.includes('.') ? host === d || host.endsWith('.' + d) : host.split('.').includes(d)));
+    const hay = ((m.title || '') + ' ' + (m.app || '')).toLowerCase();
+    return DISTRACTING.find((d) => hay.includes(d));
+  }
+
   function connectHelper() {
     let ws;
     try { ws = new WebSocket('ws://localhost:8765'); } catch (e) { return; }
@@ -630,8 +640,7 @@
       if (m.t === 'focus') { onCameraTick(m); return; }
       if (m.t === 'camera_error') { toast('Camera: ' + (m.message || 'could not start') + '. The session continues without it.'); return; }
       if (m.t !== 'active') return;
-      const hay = ((m.url || '') + ' ' + (m.title || '') + ' ' + (m.app || '')).toLowerCase();
-      const hit = DISTRACTING.find((d) => hay.includes(d));
+      const hit = distractingMatch(m);
       if (hit) startDrift('site', m.label || hit.charAt(0).toUpperCase() + hit.slice(1).replace('.com', ''));
       else if (S.session && S.session.drift && S.session.drift.kind === 'site') endDrift();
     };

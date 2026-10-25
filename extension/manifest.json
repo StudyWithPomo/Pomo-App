@@ -1,0 +1,9 @@
+{
+  "manifest_version": 3,
+  "name": "Pomo Focus Helper",
+  "version": "0.1",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAuwNa4fhJwwnTH6jeIqOb3RU2UvYAlk7Nx1OnvZPXYYSVmr4r+BUuI/NzWz9KB9pE26q2Tv35WnbWljA2yqRJRHnY4OjZ87XBq7qoYvZb6SrN73QK+RajzpHpwM2ZZ16OzTva3fyoecASXc142BY4H1aCPu9W4GjRba8jIx15kI7gGtoYMYAHn7wb0soNme2le7mWD1BHDTnJCM+u7JCAA0yCyr7Tz/PFaqRmuZwjRsjbyY0GJYnEnxvaN58GMMu7avLKsH+2yrrI0XTNNBInJ/GeKTA5U85Oa8JDTUWOL5u8MdNCyeNf/2DW79k7+AADDM/z4p8uFRTt7P0vBQ7zHQIDAQAB",
+  "description": "Tells the Pomo dashboard which tab you're on, so your desk pet notices when you drift.",
+  "permissions": ["tabs"],
+  "background": { "service_worker": "background.js" }
+}
