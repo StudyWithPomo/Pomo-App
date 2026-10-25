@@ -30,7 +30,7 @@ def hub():
 def test_serves_dashboard(hub):
     with urllib.request.urlopen(f"http://127.0.0.1:{hub.http_port}/") as r:
         assert r.status == 200
-        assert b"Study Buddy" in r.read()
+        assert b"<title>Pomo</title>" in r.read()
     with urllib.request.urlopen(f"http://127.0.0.1:{hub.http_port}/app.js") as r:
         assert r.status == 200
 
