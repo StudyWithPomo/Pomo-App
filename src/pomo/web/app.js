@@ -54,6 +54,12 @@
     care: null, // Milestone E gears and hunger: null until the device reports them (today's firmware never does)
     feedWait: 0, // a feed request is waiting for the device's pet reply (the 2 s timer)
     feedUnsupported: false, // this connection's firmware didn't answer feed: feed on the device instead
+    lookSync: false, // this connection's device sends look: the pet's look syncs both ways
+    devLook: null, // the device's look as it last said ({ name, body, face, color })
+    lookWait: 0, // on connect, the wait for the device's look before sending ours
+    syncTimer: 0, // a Setup change waiting to be sent (the name is debounced)
+    syncConfirm: 0, // a sent change waiting for the device's look
+    syncPending: false,
     shhUntil: 0, // tapped during focus: the shh face until then
     play: { wound: 0, key: 0, shown: null, lastPlay: 0, lastRunDown: 0, dancing: false, danceAt: 0, gear: null, asleep: false, loveUntil: 0, line: '' }
   };
@@ -229,9 +235,12 @@
     });
   }
 
-  function petChanged() {
+  // debounce: typing (the names) waits 600 ms before syncing; chips sync at once
+  function petChanged(debounce) {
     save();
-    $('sentNote').textContent = S.device.connected ? 'Changes show on the device after you send them.' : '';
+    if (S.device.connected && S.lookSync) scheduleSync(debounce ? 600 : 0);
+    else if (S.device.connected) $('sentNote').textContent = 'Changes show on the device after you send them.';
+    else renderSync();
     renderSetup();
   }
 
@@ -501,6 +510,7 @@
   function renderLive() {
     const s = S.session;
     if (!s) return;
+    $('pausedNote').hidden = !(S.paused && S.device.connected); // the device reports it paused study: say so quietly
     const now = Date.now();
     const peeking = now < S.peekUntil;
     const showTime = s.mode === 'break' || S.settings.pinTime || peeking;
@@ -850,8 +860,10 @@
     S.feedUnsupported = false;
     clearTimeout(S.feedWait);
     S.feedWait = 0;
+    S.lookSync = false;
+    S.devLook = null;
     setDeviceChip();
-    sendConfig();
+    syncOnConnect();
     readLoop(port);
     return true;
   }
@@ -885,7 +897,7 @@
     const s = S.session;
     return !!(S.device.connected && s && (s.mode === 'focus' || !s.local));
   }
-  const linkDown = () => !!(S.lost || S.paused || S.recon);
+  const linkDown = () => !!(S.lost || S.recon);
   // The link dropped (the read loop ended, or the device went silent).
   function linkLost() {
     const dev = S.device;
@@ -1060,7 +1072,7 @@
     // Over Bluetooth the board stays powered and keeps timing; over USB (no battery) it usually lost power
     if (S.lost) {
       $('linkLostSub').textContent = S.lost.info.bluetoothServiceClassId != null
-        ? 'Pomo is still keeping time. Plug it back in or reconnect Bluetooth to see it.'
+        ? 'Pomo paused your session. Reconnect to pick up where you left off.' // the firmware pauses study after 6 s without the laptop
         : "Pomo lost power or the cable came loose. Plug it back in; if it restarted, you'll start a fresh session.";
     }
     $('linkLostTry').textContent = S.lost ? 'Looking for ' + petName() + '…' : '';
@@ -1090,7 +1102,8 @@
     if (!S.device.writer) return;
     S.device.writer.write(line).catch(() => {});
   }
-  function sendConfig() {
+  // withPet false: only the user, clock and timezone (on connect, so the device's look can win)
+  function sendConfig(withPet = true) {
     const st = S.settings;
     const pet = { name: petName().slice(0, 10) };
     if (['bot', 'cat', 'dog'].includes(st.body)) pet.body = st.body;
@@ -1098,7 +1111,7 @@
     if (['brass', 'copper', 'pewter', 'verdigris'].includes(st.color)) pet.color = st.color;
     // An empty name is left out, so it never wipes a name the device already has (friends then see the pet's)
     const user = String(st.user || '').trim().slice(0, 16);
-    send(Object.assign({ t: 'config' }, user ? { user } : {}, { pet, time: Math.floor(Date.now() / 1000), tz: -new Date().getTimezoneOffset() }));
+    send(Object.assign({ t: 'config' }, user ? { user } : {}, withPet ? { pet } : {}, { time: Math.floor(Date.now() / 1000), tz: -new Date().getTimezoneOffset() }));
   }
   // The helper's tick carries exactly the schema's fields today; rebuild it anyway so nothing extra reaches the device.
   function focusMsg(m) {
@@ -1209,8 +1222,8 @@
       case 'hello':
         // The firmware also says hello on every Bluetooth connect, with its session still running:
         // the next state decides whether it really restarted (see onDeviceState)
-        if (S.lost || S.recon) { S.helloSeen = true; sendConfig(); break; }
-        toast('Device says hello (firmware ' + (m.fw || '?') + ').'); sendConfig(); break;
+        if (S.lost || S.recon) { S.helloSeen = true; syncOnConnect(); break; }
+        toast('Device says hello (firmware ' + (m.fw || '?') + ').'); syncOnConnect(); break;
       case 'start': onDeviceStart(m); break;
       case 'state': onDeviceState(m); break;
       case 'end': onDeviceEnd(m); break;
@@ -1218,6 +1231,7 @@
         if (Array.isArray(m.friends)) onCircle(m.friends);
         break;
       case 'pet': onPet(m); break;
+      case 'look': onLook(m); break;
     }
   }
   // ---------- Pet care (Milestone E, prepared) ----------
@@ -1484,11 +1498,81 @@
     if (fieldId) $(fieldId).focus();
   }
 
+  // ---------- Pet look sync (Firmware-Pomo main/comms/link.cpp: look) ----------
+  // A device that sends look owns the pet's look: on connect its look wins, Setup changes go to it
+  // as config, and its look confirms them. A device that never sends look keeps Send to device.
+  const LOOK_WAIT_MS = 1500, CONFIRM_MS = 3000;
+  const lookOf = () => ({ name: petName().slice(0, 10), body: S.settings.body, face: S.settings.face, color: S.settings.color });
+  const lookMatches = () => { const d = S.devLook, l = lookOf(); return !!d && d.name === l.name && d.body === l.body && d.face === l.face && d.color === l.color; };
+  // The clock and user straight away; the pet only if the device hasn't said its look by then
+  // (old firmware, or a running board opened over USB, which sends no hello)
+  function syncOnConnect() {
+    sendConfig(false);
+    clearTimeout(S.lookWait);
+    S.lookWait = setTimeout(() => { if (S.device.connected && !S.lookSync) sendConfig(); renderSync(); }, LOOK_WAIT_MS);
+  }
+  function scheduleSync(delay) {
+    clearTimeout(S.syncTimer);
+    S.syncPending = true;
+    renderSync();
+    S.syncTimer = setTimeout(syncNow, delay);
+  }
+  function syncNow() {
+    S.syncTimer = 0;
+    // an emptied name isn't sent (the device would keep its own); the next keystroke syncs
+    if (!(S.settings.name || '').trim() || !S.device.connected) { S.syncPending = false; renderSync(); return; }
+    sendConfig();
+    clearTimeout(S.syncConfirm);
+    if (lookMatches()) { S.syncPending = false; renderSync(); return; } // same look: the device won't reply
+    S.syncConfirm = setTimeout(() => { S.syncPending = false; renderSync(); }, CONFIRM_MS);
+  }
+  // The device's look: take it (save it, redraw every pet). Nothing is sent back, so there's no loop.
+  function onLook(m) {
+    const ok = (v, list) => list.includes(v);
+    if (typeof m.name !== 'string' || !ok(m.body, ['bot', 'cat', 'dog']) || !ok(m.face, ['plain', 'monocle']) || !ok(m.color, ['brass', 'copper', 'pewter', 'verdigris'])) return;
+    S.devLook = { name: m.name.slice(0, 10), body: m.body, face: m.face, color: m.color };
+    S.lookSync = true;
+    clearTimeout(S.lookWait);
+    clearTimeout(S.syncConfirm);
+    if (!S.syncTimer) { // a change still being typed here goes out next and wins
+      const st = S.settings;
+      if (S.devLook.name) st.name = S.devLook.name;
+      st.body = m.body; st.face = m.face; st.color = m.color;
+      save();
+      if ($('petName').value !== st.name) $('petName').value = st.name;
+      S.syncPending = false;
+    }
+    renderSetup();
+    drawPets();
+    renderSync();
+    if (S.view === 'home') renderHome();
+  }
+  function renderSync() {
+    const btn = $('sendPetBtn'), note = $('sentNote');
+    if (!S.device.connected) { btn.hidden = true; note.textContent = 'Saved here; syncs when Pomo connects.'; return; }
+    if (!S.lookSync) { btn.hidden = false; btn.disabled = false; if (note.textContent === 'Saved here; syncs when Pomo connects.') note.textContent = ''; return; }
+    btn.hidden = true;
+    note.textContent = S.syncPending ? 'Syncing with Pomo…' : lookMatches() ? 'Synced with Pomo.' : 'Not synced yet. Change it again to retry.';
+  }
+
+  // The 2 s heartbeat ticks in a Web Worker, whose timers background tabs don't throttle the way
+  // they do the page's; if a Worker can't start, the page's own timer does it
+  function startPing() {
+    const ping = () => { if (S.device.connected) send({ t: 'ping' }); };
+    const fallback = () => { if (!startPing.timer) startPing.timer = setInterval(ping, 2000); };
+    try {
+      const src = URL.createObjectURL(new Blob(['setInterval(() => postMessage(0), 2000);'], { type: 'text/javascript' }));
+      const w = new Worker(src);
+      w.onmessage = ping;
+      w.onerror = () => { w.terminate(); fallback(); };
+    } catch (e) { fallback(); }
+  }
+
   function setDeviceChip() {
     $('deviceLamp').className = 'lamp' + (S.device.connected ? ' on' : '');
     $('deviceText').textContent = S.device.connected ? 'Device coupled · USB' : S.lost ? 'Device lost · Reconnect' : 'Connect device';
-    $('sendPetBtn').disabled = !S.device.connected;
-    $('sentNote').textContent = S.device.connected ? '' : 'Connect the device to send.';
+    if (!S.device.connected) { S.lookSync = false; clearTimeout(S.lookWait); }
+    renderSync();
     if (S.view === 'home') renderHome();
   }
 
@@ -1915,9 +1999,9 @@ const HEART_SVG = '<svg viewBox="0 0 7 6" width="100%" height="100%" shape-rende
     document.querySelectorAll('.porthole').forEach(wirePetting);
     $('goal').value = S.settings.goal || '';
     $('userName').value = S.settings.user || '';
-    $('userName').addEventListener('input', (e) => { S.settings.user = e.target.value.slice(0, 16); petChanged(); });
+    $('userName').addEventListener('input', (e) => { S.settings.user = e.target.value.slice(0, 16); petChanged(true); });
     $('petName').value = S.settings.name;
-    $('petName').addEventListener('input', (e) => { S.settings.name = e.target.value.slice(0, 10); petChanged(); });
+    $('petName').addEventListener('input', (e) => { S.settings.name = e.target.value.slice(0, 10); petChanged(true); });
     $('beginBtn').addEventListener('click', startSession);
     $('sendPetBtn').addEventListener('click', () => { sendConfig(); $('sentNote').textContent = 'Sent. ' + petName() + ' is on the device now.'; });
     $('deviceBtn').addEventListener('click', connectDevice);
@@ -1981,7 +2065,7 @@ const HEART_SVG = '<svg viewBox="0 0 7 6" width="100%" height="100%" shape-rende
       renderSetup();
       renderReady();
     });
-    setInterval(() => { if (S.device.connected) send({ t: 'ping' }); }, 2000);
+    startPing();
     $('reconnectBtn').addEventListener('click', () => reconnectDevice(true));
     $('leaveBtn').addEventListener('click', leaveLostSession);
     if ('serial' in navigator) navigator.serial.addEventListener('connect', () => reconnectDevice(false));

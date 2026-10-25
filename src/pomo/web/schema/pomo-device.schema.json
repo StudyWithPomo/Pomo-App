@@ -18,7 +18,8 @@
     { "$ref": "#/$defs/state" },
     { "$ref": "#/$defs/end_device" },
     { "$ref": "#/$defs/circle" },
-    { "$ref": "#/$defs/pet" }
+    { "$ref": "#/$defs/pet" },
+    { "$ref": "#/$defs/look" }
   ],
   "$defs": {
     "config": {
@@ -147,21 +148,21 @@
       }
     },
     "feed": {
-      "description": "Laptop -> device. Needs firmware support (planned with Milestone E): asks the device to feed the pet one gear, as if fed on the device. The device decides and answers with a pet message whose event is fed, empty or stuffed; the laptop never changes the gear count itself. Firmware without it ignores the line. No fields.",
+      "description": "Laptop -> device. Feeds the pet a gear, exactly as the device's own Feed: the device decides and answers with a pet message whose event is fed, empty or stuffed, with the new gears. The laptop never changes the gear count itself. Firmware before 5876154 ignores the line. No fields.",
       "type": "object",
       "additionalProperties": false,
       "required": ["t"],
       "properties": { "t": { "const": "feed" } }
     },
     "ping": {
-      "description": "Laptop -> device. Heartbeat, sent every 2 s while the laptop is coupled. The firmware has no handler for it: like any JSON line with a string t it only marks the link as seen. The device does not pause when the laptop goes silent. No fields.",
+      "description": "Laptop -> device. Heartbeat, sent every 2 s while the laptop is coupled. The first ping arms the device's laptop watch; after that, 6 s with no line from the laptop pauses a running study session (state.paused) and ends the laptop's drift, and the next line resumes it. No fields.",
       "type": "object",
       "additionalProperties": false,
       "required": ["t"],
       "properties": { "t": { "const": "ping" } }
     },
     "hello": {
-      "description": "Device -> laptop. Sent when the link task starts (boot) and again whenever a laptop connects over Bluetooth, while any session keeps running. fw is the firmware version.",
+      "description": "Device -> laptop. Sent when the link task starts (boot) and again whenever a laptop connects over Bluetooth, while any session keeps running. Followed at once by look (when the look is known) and pet (event hello). Not sent when a laptop opens the USB port of a running device. fw is the firmware version.",
       "type": "object",
       "additionalProperties": false,
       "required": ["t", "fw"],
@@ -233,8 +234,9 @@
         },
         "drift_s": { "type": "integer", "minimum": 0, "description": "Seconds the current drift has been active." },
         "earned": { "type": "integer", "minimum": 0, "description": "Live XP earned so far in the running study session. Sent only while phase is study." },
-        "gears": { "type": "integer", "minimum": 0, "maximum": 12, "description": "Milestone E: gears held." },
-        "hunger": { "enum": ["full", "content", "peckish", "hungry"], "description": "Milestone E: the pet's hunger level." },
+        "paused": { "type": "boolean", "description": "Sent (true) only while study is on hold because the laptop went silent for 6 s; absent otherwise." },
+        "gears": { "type": "integer", "minimum": 0, "maximum": 12, "description": "Milestone E: gears held. Sent in every state by current firmware." },
+        "hunger": { "enum": ["full", "content", "peckish", "hungry"], "description": "Milestone E: the pet's hunger level. Sent in every state by current firmware." },
         "mult": {
           "type": "integer",
           "minimum": 1,
@@ -283,6 +285,19 @@
         "fed_at": { "type": "integer", "minimum": 0, "description": "Unix seconds, or 0 if never or unknown." },
         "event": { "enum": ["hello", "earned", "fed", "empty", "stuffed", "hunger"], "description": "Why it was sent; hunger means the level changed." },
         "earned": { "type": "integer", "minimum": 0, "description": "Only with event earned: gears this session added after the cap (0 when the bar was full; the firmware leaves the field out then)." }
+      }
+    },
+    "look": {
+      "description": "Device -> laptop. The pet's look, in config's pet field names and values. Sent right after hello (once the look is known) and whenever the look changes: on the device (Wardrobe), or by a config, when it is that config's confirmation. A config that sets the same look gets no reply.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t", "name", "body", "face", "color"],
+      "properties": {
+        "t": { "const": "look" },
+        "name": { "type": "string", "maxLength": 10, "description": "Up to 10 bytes on the device." },
+        "body": { "enum": ["bot", "cat", "dog"] },
+        "face": { "enum": ["plain", "monocle"] },
+        "color": { "enum": ["brass", "copper", "pewter", "verdigris"] }
       }
     },
     "circle": {
