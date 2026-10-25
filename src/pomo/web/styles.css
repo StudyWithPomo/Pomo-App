@@ -56,14 +56,14 @@ button { font: inherit; }
 }
 .steps li { display: inline-flex; align-items: center; gap: 8px; }
 .steps li + li::before { content: ""; width: 24px; height: 2px; margin: 0 12px; background: var(--rim); }
-.steps .pip { width: 14px; height: 14px; border: 2px solid var(--rim); }
-.steps li[data-state="done"] { color: var(--brass); }
-.steps li[data-state="done"] .pip {
+.steps .pip, .cycle .pip { width: 14px; height: 14px; border: 2px solid var(--rim); }
+.steps li[data-state="done"], .cycle li[data-state="done"] { color: var(--brass); }
+.steps li[data-state="done"] .pip, .cycle li[data-state="done"] .pip {
   background: var(--brass) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 5 5' shape-rendering='crispEdges' fill='%231E1510'%3E%3Crect x='0' y='2' width='1' height='1'/%3E%3Crect x='1' y='3' width='1' height='1'/%3E%3Crect x='2' y='2' width='1' height='1'/%3E%3Crect x='3' y='1' width='1' height='1'/%3E%3Crect x='4' y='0' width='1' height='1'/%3E%3C/svg%3E") center / 10px 10px no-repeat;
   border-color: var(--brass);
 }
-.steps li[data-state="current"] { color: var(--brass-pale); }
-.steps li[data-state="current"] .pip { background: var(--brass-pale); border-color: var(--brass-pale); outline: 2px solid var(--brass); outline-offset: 2px; }
+.steps li[data-state="current"], .cycle li[data-state="current"] { color: var(--brass-pale); }
+.steps li[data-state="current"] .pip, .cycle li[data-state="current"] .pip { background: var(--brass-pale); border-color: var(--brass-pale); outline: 2px solid var(--brass); outline-offset: 2px; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .device-chip {
   display: inline-flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 16px;
@@ -437,17 +437,72 @@ main { max-width: 1200px; margin: 0 auto; padding: 28px 16px 96px; }
 }
 
 /* ---------- Home: the instrument's front plate ---------- */
-.home { flex-direction: row; align-items: center; gap: 48px; padding: 40px 44px; }
-.home-pet { display: flex; flex-direction: column; align-items: center; gap: 12px; flex-shrink: 0; }
+/* Fills the screen under the top bar: the bottom padding that leaves room for the demo drawer isn't needed here */
+main:has(> #view-home:not([hidden])) { padding-bottom: 16px; }
+.home { padding: 40px 44px; }
+.home.full { min-height: calc(100vh - 150px); justify-content: space-between; gap: 22px; padding: 30px 40px; }
+.home-top { flex: 1 1 auto; display: flex; align-items: center; gap: 48px; }
+.home-pet { display: flex; flex-direction: column; align-items: center; gap: 12px; flex-shrink: 0; width: 250px; }
 .home-main { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 22px; }
 .home-body { display: flex; flex-direction: column; gap: 18px; }
 .home-body .lede { margin: 0; max-width: 34em; }
-.home-gauge { max-width: 600px; border-top: 1px solid var(--rim); padding-top: 14px; }
-.home-gauge .rail-text { margin: 0 0 8px; }
-.home-readout { margin: 0; font-size: 19px; color: var(--text-soft); }
+.home-front { display: flex; flex-direction: column; align-items: center; gap: 14px; text-align: center; }
+.home-greet { font-size: 42px; }
+.home-clock { display: flex; align-items: flex-end; gap: 10px; }
+.nixie.clock { zoom: .7; flex-wrap: nowrap; }
+.nixie.clock.blink .colon circle { opacity: 0.15; }
+.home-readout { margin: 0; font-size: 18px; color: var(--text-soft); }
+.cycle { display: flex; align-items: center; margin: 0; padding: 0; list-style: none; font-family: var(--display); font-size: 18px; color: var(--muted); }
+.cycle li { display: inline-flex; align-items: center; gap: 8px; }
+.cycle li + li::before { content: ""; width: 24px; height: 2px; margin: 0 12px; background: var(--rim); }
+.home-gauge { width: min(560px, 100%); border-top: 1px solid var(--rim); padding-top: 12px; }
+.home-gauge .rail { max-width: none; }
+.home-gauge .rail-text { margin: 0 0 8px; max-width: none; }
+.home-front .actions { justify-content: center; }
 .home-device { margin: 0; display: flex; align-items: center; gap: 10px; border-top: 1px solid var(--rim); padding-top: 16px; font-size: 16px; color: var(--muted); }
+.home.full .home-device { justify-content: center; border-top: 0; padding-top: 0; }
 .home-device.awake { color: var(--text-soft); }
-.home .porthole.xl { width: 228px; height: 228px; } .home .porthole.xl canvas { width: 144px; height: 144px; } /* the pet stays large on Home, even in the compact layout */
+.home .porthole.xl { width: 228px; height: 228px; } .home .porthole.xl canvas { width: 144px; height: 144px; } /* the pet stays large on Home */
+/* The shelf of today's time cards: small slips of the card's paper */
+.shelf { border-top: 1px solid var(--rim); padding-top: 14px; display: flex; flex-direction: column; gap: 10px; }
+.shelf-row { display: flex; flex-wrap: wrap; gap: 16px; }
+.mini-card {
+  width: 168px; min-height: 64px; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  background: var(--parch); color: var(--ink); border: 0; font-family: var(--mono); font-size: 13px; text-transform: uppercase; cursor: pointer;
+  clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 0 100%);
+}
+.mini-card:focus-visible { clip-path: none; }
+.mini-card .mini-stamp {
+  width: 48px; height: 48px; border-radius: 50%; border: 3px double var(--copper); color: var(--copper);
+  display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600; transform: rotate(-14deg); flex-shrink: 0;
+}
+.mini-card.empty { background: transparent; border: 2px dashed var(--rim); clip-path: none; cursor: default; width: auto; text-transform: none; font-family: var(--body); color: var(--muted); font-size: 15px; }
+@media (max-height: 820px) and (min-width: 900px) {
+  .home.full { min-height: calc(100vh - 110px); padding: 18px 28px; gap: 14px; }
+  .home.full .home-main { gap: 12px; }
+  .home-greet { font-size: 34px; }
+  .home-front { gap: 10px; }
+  .nixie.clock { zoom: .5; }
+  .home .porthole.xl { width: 196px; height: 196px; } .home .porthole.xl canvas { width: 124px; height: 124px; }
+  .mini-card { min-height: 56px; padding: 6px 12px; } .mini-card .mini-stamp { width: 42px; height: 42px; font-size: 13px; }
+}
+/* Tall screens (full HD): the instrument grows so the plate isn't left half empty */
+@media (min-height: 900px) {
+  .home.full { gap: 24px; padding: 32px 48px; }
+  .home.full .home-main { gap: 26px; }
+  .home-front { gap: 20px; }
+  .home-greet { font-size: 56px; }
+  .nixie.clock { zoom: 1; }
+  .home-readout { font-size: 21px; }
+  .cycle { font-size: 21px; }
+  .home .porthole.xl { width: 300px; height: 300px; } .home .porthole.xl canvas { width: 192px; height: 192px; }
+  .home-pet { width: 320px; }
+  .home-gauge { width: min(660px, 100%); }
+  .mini-card { width: 210px; min-height: 84px; font-size: 15px; } .mini-card .mini-stamp { width: 60px; height: 60px; font-size: 17px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nixie.clock.blink .colon circle { opacity: 1; } /* the colon stays lit */
+}
 @media (max-width: 760px) {
   .home { flex-direction: column; align-items: stretch; padding: 28px 22px; }
 }

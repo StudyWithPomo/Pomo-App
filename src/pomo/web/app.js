@@ -74,6 +74,8 @@
     S.view = view;
     for (const v of ['home', 'setup', 'live', 'card']) $('view-' + v).hidden = v !== view;
     $('brandBtn').setAttribute('aria-disabled', String(!!S.session)); // Home only between sessions
+    document.querySelector('.steps').hidden = view === 'home'; // Home isn't a step
+    if (view !== 'card') S.viewCard = null;
     // Progress markers, not links: earlier steps read as done, the current one is lit.
     const here = ['setup', 'live', 'card'].indexOf(view);
     document.querySelectorAll('.steps li').forEach((el, i) => {
@@ -232,8 +234,9 @@
     return { body: S.settings.body, face: S.settings.face, color: S.settings.color, level: S.progress.level, mood };
   }
   function drawPets() {
-    if (S.lastCard) {
-      StudyPet.drawPet($('petCard'), petOpts(S.isPetting ? 'love' : S.lastCard.mood));
+    const card = S.viewCard || S.lastCard;
+    if (card) {
+      StudyPet.drawPet($('petCard'), petOpts(S.isPetting ? 'love' : card.mood));
     }
     StudyPet.drawPet($('petSetup'), petOpts(currentMood()));
     StudyPet.drawPet($('petLive'), petOpts(currentMood()));
@@ -254,9 +257,9 @@
     '<circle cx="16" cy="118" r="4" fill="#FFD9A0" filter="url(#nxDot)"/><circle cx="16" cy="146" r="4" fill="#FFD9A0" filter="url(#nxDot)"/>' +
     '<rect x="8" y="170" width="16" height="10" fill="#15100C" stroke="#4A3522"/></svg>';
 
-  const tubes = [];
-  function buildNixie() {
-    const box = $('nixie');
+  // Four tubes with a colon in the middle, in `box`; returns the tubes
+  function buildTubes(box) {
+    const list = [];
     box.innerHTML = '';
     for (let i = 0; i < 5; i++) {
       const el = document.createElement('div');
@@ -264,18 +267,23 @@
       el.className = 'tube';
       el.innerHTML = TUBE_SVG + '<span class="glyph ghost"></span><span class="glyph ghost b"></span><span class="glyph lit"></span>';
       box.appendChild(el);
-      tubes.push(el);
+      list.push(el);
     }
+    return list;
   }
+  // One tube shows `ch` ('' leaves it unlit), with the neighbouring cathodes faint behind it
+  function setTube(el, ch) {
+    const d = Number(ch || 0);
+    const [ga, gb, l] = el.querySelectorAll('.glyph');
+    ga.textContent = String((d + 3) % 10);
+    gb.textContent = String((d + 6) % 10);
+    if (l.textContent !== ch) l.textContent = ch;
+  }
+  let tubes = [];
+  function buildNixie() { tubes = buildTubes($('nixie')); }
   function setNixie(sec, lit) {
     const t = mmss(Math.max(0, sec)).replace(':', '');
-    tubes.forEach((el, i) => {
-      const d = Number(t[i]);
-      const [ga, gb, l] = el.querySelectorAll('.glyph');
-      ga.textContent = String((d + 3) % 10);
-      gb.textContent = String((d + 6) % 10);
-      if (l.textContent !== t[i]) l.textContent = t[i];
-    });
+    tubes.forEach((el, i) => setTube(el, t[i]));
     $('nixie').classList.toggle('dark', !lit);
     $('nixie').setAttribute('aria-label', lit ? Math.floor(sec / 60) + ' minutes ' + Math.floor(sec % 60) + ' seconds left' : 'Timer hidden');
   }
@@ -453,10 +461,10 @@
       total: s.total, done, focusedSec, pct, focusedMin, mult, earned, penalty,
       study: s.study, heartDelta, leveled, before, test: !!(m && S.testTiming), events: s.events.slice(), minutes: minuteKinds(s, true), brk: s.brk, finished: null
     };
-    countToday();
     S.session = null;
     S.sessionNo = S.sessionNo % SESSIONS_PER_SET + 1;
     renderCard();
+    archiveCard(S.lastCard);
     show('card');
   }
 
@@ -594,8 +602,9 @@
 
   // ---------- Time card ----------
   function renderCard() {
-    const c = S.lastCard;
+    const c = S.viewCard || S.lastCard;
     if (!c) return;
+    S.cardShown = c;
     const rows = [];
     for (let r = 0; r < Math.ceil(c.minutes.length / 5); r++) {
       rows.push('<span class="m">' + r * 5 + 'm</span>');
@@ -634,7 +643,7 @@
 
       c.mood = c.pct >= 60 ? 'love' : c.pct >= PENALTY_BELOW ? 'happy' : 'annoyed';
       StudyPet.drawPet($('petCard'), petOpts(c.mood));
-      if (c.leveled) levelUpMoment(c);
+      if (c.leveled && !c.levelShown) { c.levelShown = true; levelUpMoment(c); } // once, not on every redraw
       $('petVerdict').textContent = c.leveled ? petName() + ' reached Level ' + S.progress.level + '!' + (S.progress.level === 5 ? ' Goggles unlocked.' : S.progress.level === 10 ? ' Bow tie unlocked.' : S.progress.level === 15 ? ' Top hat unlocked.' : '') :
       tooShort ? petName() + ' barely got started.' : c.pct >= 80 ? petName() + ' is most proud.' : c.pct >= PENALTY_BELOW ? petName() + ' is content.' : petName() + ' is disappointed, but you keep your level.';
     $('cardLevel').textContent = 'Lv ' + S.progress.level;
@@ -652,6 +661,7 @@
     const noBreak = c.early;
     $('startBreakBtn').hidden = noBreak;
     $('skipBreakBtn').textContent = noBreak ? 'Begin next session' : 'Skip to next session';
+    $('nextTitle').closest('.panel').hidden = !!S.viewCard; // an earlier card from the shelf is only for looking at
     const long = c.no === SESSIONS_PER_SET;
     if (noBreak) {
       $('nextTitle').textContent = 'Session ' + ROMAN[S.sessionNo - 1] + ' of IV';
@@ -694,7 +704,7 @@
   // The circle's cards: real friends' last scored session from the device (0 while they're still
   // studying, shown as a dash until their result arrives); the demo drawer keeps the made-up ones.
   function renderBoard() {
-    const c = S.lastCard;
+    const c = S.viewCard || S.lastCard;
     if (!c) return;
     const fake = demoOn();
     const board = [{ name: 'You', pct: c.pct, me: true }].concat(circleShown().map((f, i) =>
@@ -712,7 +722,7 @@
   }
 
   function renderFinish() {
-    const c = S.lastCard;
+    const c = S.viewCard || S.lastCard;
     const notes = { yes: 'Logged as finished.', partly: 'Logged as partly done. The rest carries into the next session.', no: 'Logged as not finished. It carries into the next session.' };
     $('finishChips').replaceChildren(...[['yes', 'Yes'], ['partly', 'Partly'], ['no', 'Not yet']].map(([k, l]) => chip(l, c.finished === k, () => {
       c.finished = k;
@@ -1189,10 +1199,51 @@
     }
   }
   // ---------- Home ----------
-  // Sessions scored today in this browser, kept as { day: 'YYYY-MM-DD', n }
+  // Today's time cards in this browser, kept as { day: 'YYYY-MM-DD', list } (dates as ISO strings)
   const todayKey = () => { const d = new Date(); return d.getFullYear() + '-' + two(d.getMonth() + 1) + '-' + two(d.getDate()); };
-  const sessionsToday = () => { const t = store.get('today', null); return t && t.day === todayKey() ? t.n : 0; };
-  function countToday() { store.set('today', { day: todayKey(), n: sessionsToday() + 1 }); }
+  function todaysCards() {
+    const t = store.get('cards', null);
+    if (!t || t.day !== todayKey() || !Array.isArray(t.list)) return [];
+    return t.list.map((c) => Object.assign({}, c, { startedAt: new Date(c.startedAt), endedAt: new Date(c.endedAt) }));
+  }
+  function archiveCard(c) {
+    if (!c) return;
+    const list = todaysCards();
+    // a stored card never replays its level-up
+    list.push(Object.assign({}, c, { id: c.endedAt.getTime(), leveled: false }));
+    store.set('cards', { day: todayKey(), list: list.slice(-12) });
+  }
+  // The latest card, redrawn if an earlier one from the shelf was on the card view
+  function showLastCard() {
+    if (!S.lastCard || S.session) return;
+    S.viewCard = null;
+    if (S.cardShown !== S.lastCard) renderCard();
+    show('card');
+  }
+  // Open a card from the shelf: the latest is the live one, an earlier one is shown on its own
+  function openCard(card) {
+    if (S.session) return;
+    if (S.lastCard && S.lastCard.endedAt.getTime() === card.id) { showLastCard(); return; }
+    S.viewCard = card;
+    renderCard();
+    show('card');
+  }
+  // The nixie clock: 12-hour, the hour's first tube unlit below 10, the colon blinking each second
+  let clockTubes = null, clockMin = -1;
+  function renderClock() {
+    if (!clockTubes) clockTubes = buildTubes($('homeClock'));
+    const now = new Date();
+    $('homeClock').classList.toggle('blink', now.getSeconds() % 2 === 1);
+    const stamp = now.getHours() * 60 + now.getMinutes();
+    if (stamp === clockMin) return;
+    clockMin = stamp;
+    const h = now.getHours() % 12 || 12;
+    const t = (h < 10 ? ' ' + h : String(h)) + two(now.getMinutes());
+    clockTubes.forEach((el, i) => setTube(el, t[i] === ' ' ? '' : t[i]));
+    const ampm = now.getHours() < 12 ? 'AM' : 'PM';
+    $('homeAmPm').textContent = ampm;
+    $('homeClock').setAttribute('aria-label', 'The time is ' + h + ':' + two(now.getMinutes()) + ' ' + ampm);
+  }
   const firstVisit = () => store.get('settings', null) === null; // nothing saved yet in this browser
   function renderHome() {
     const first = firstVisit();
@@ -1202,26 +1253,65 @@
     $('homePetTitle').replaceChildren(...withNums([petName() + ' · Lv ', { n: S.progress.level }]));
     if (!first) {
       const h = new Date().getHours();
-      const part = h >= 5 && h < 12 ? 'Morning' : h >= 12 && h < 17 ? 'Afternoon' : 'Evening';
+      const part = h < 5 ? 'Up late' : h < 12 ? 'Morning' : h < 17 ? 'Afternoon' : 'Evening';
       const who = (S.settings.user || '').trim();
       $('homeGreeting').textContent = who ? part + ', ' + who + '.' : part + '.';
       $('homeLevel').replaceChildren(...withNums(['To level ', { n: S.progress.level + 1 }]));
       $('homeXp').replaceChildren(...withNums([{ n: S.progress.xp }, ' / ', { n: XP_PER_LEVEL }, ' XP']));
       $('homeXpFill').style.width = Math.min(100, (S.progress.xp / XP_PER_LEVEL) * 100).toFixed(1) + '%';
-      $('homeToday').replaceChildren(...withNums(['Sessions today: ', { n: sessionsToday() }]));
-      const c = S.lastCard;
-      $('homeLast').hidden = !c;
-      $('homeCardBtn').hidden = !c;
-      if (c) {
-        $('homeLast').replaceChildren(...withNums(['Last: ', { n: c.pct }, '% focused, ', { n: Math.round(c.done / 60) }, ' min, ',
-          { n: (c.penalty ? '\u2212' + c.penalty : '+' + c.earned) }, ' XP']));
-      }
+      renderClock();
+      const cards = todaysCards();
+      const focused = cards.reduce((sum, c) => sum + (c.focusedMin || 0), 0);
+      $('homeFocused').hidden = !focused;
+      $('homeFocused').replaceChildren(...withNums([{ n: focused }, ' min focused today']));
+      // The set's four sessions: done ones filled, the next one lit (as the Begin label counts them)
+      const next = S.sessionNo;
+      $('homeCycle').setAttribute('aria-label', 'Session ' + ROMAN[next - 1] + ' of IV is next');
+      $('homeCycle').replaceChildren(...ROMAN.map((r, i) => {
+        const li = document.createElement('li');
+        li.dataset.state = i < next - 1 ? 'done' : i === next - 1 ? 'current' : 'todo';
+        li.innerHTML = '<span class="pip" aria-hidden="true"></span><span></span>';
+        li.lastChild.textContent = r;
+        return li;
+      }));
+      $('homeCardBtn').hidden = !S.lastCard;
+      renderShelf(cards);
+    } else {
+      $('homeShelfWrap').hidden = true;
     }
+    document.querySelector('.home').classList.toggle('full', !first);
     const awake = S.device.connected;
     $('homeLamp').className = 'lamp' + (awake ? ' on' : '');
     $('homeDevice').parentElement.classList.toggle('awake', awake);
     $('homeDevice').textContent = awake ? 'Pomo is awake' : S.lost ? 'Pomo lost the link. Reconnect from the top right.' : 'Connect Pomo to begin';
     StudyPet.drawPet($('petHome'), petOpts(currentMood()));
+  }
+  // Today's cards, newest first, at most four; an empty slot on a day with none
+  function renderShelf(cards) {
+    $('homeShelfWrap').hidden = false;
+    const key = cards.map((c) => c.id).join(',');
+    if ($('homeShelf').dataset.key === key && key) return;
+    $('homeShelf').dataset.key = key;
+    if (!cards.length) {
+      const slot = document.createElement('div');
+      slot.className = 'mini-card empty';
+      slot.textContent = 'Your first card of the day lands here.';
+      $('homeShelf').replaceChildren(slot);
+      return;
+    }
+    $('homeShelf').replaceChildren(...cards.slice(-4).reverse().map((c) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'mini-card';
+      const mins = Math.round(c.done / 60);
+      const len = mins < 1 ? '<1 min' : mins + ' min';
+      b.innerHTML = '<span class="mini-stamp"></span><span class="mini-len"></span>';
+      b.firstChild.textContent = c.pct + '%';
+      b.lastChild.textContent = len;
+      b.setAttribute('aria-label', 'Time card from ' + clock(c.endedAt) + ': ' + c.pct + '% focused, ' + len);
+      b.addEventListener('click', () => openCard(c));
+      return b;
+    }));
   }
   function goHome() {
     if (S.session) return; // not mid-session
@@ -1415,7 +1505,7 @@ const HEART_SVG = '<svg viewBox="0 0 7 6" width="100%" height="100%" shape-rende
     $('homeStartBtn').addEventListener('click', () => toSetup('goal'));
     $('homeNameBtn').addEventListener('click', () => toSetup('userName'));
     $('homePetBtn').addEventListener('click', () => toSetup('petName'));
-    $('homeCardBtn').addEventListener('click', () => { if (S.lastCard && !S.session) show('card'); });
+    $('homeCardBtn').addEventListener('click', showLastCard);
     setDeviceChip();
     renderSetup();
     show('home');
