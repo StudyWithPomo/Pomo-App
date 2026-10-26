@@ -299,6 +299,13 @@ main { max-width: 1200px; margin: 0 auto; padding: 28px 16px 96px; }
 .demo-toggle { min-height: 40px; padding: 0 14px; background: var(--panel); color: var(--muted); border: 2px dashed var(--rim); font-family: var(--display); font-size: 15px; cursor: pointer; }
 .demo-body { background: var(--panel); border: 2px dashed var(--rim); padding: 14px; display: flex; flex-direction: column; gap: 8px; max-width: 280px; }
 .demo-body .hint { margin: 0; }
+/* Demo mode (simulated device): a dashed strip under the top bar, in the drawer's style */
+.demo-banner {
+  max-width: 1168px; margin: 12px auto 0; padding: 8px 14px;
+  background: var(--panel); color: var(--muted); border: 2px dashed var(--rim);
+  font-family: var(--display); font-size: 17px; line-height: 1.35;
+}
+@media (max-width: 1200px) { .demo-banner { margin: 12px 16px 0; } }
 .toast {
   position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(40px); opacity: 0;
   background: var(--parch); color: var(--ink); padding: 12px 18px; font-size: 16px; border: 2px solid var(--brass);

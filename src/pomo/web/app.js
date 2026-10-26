@@ -324,7 +324,7 @@
 
   // ---------- Session engine ----------
   // The demo drawer (D) swaps in fake friends, so linked play can be shown without a second device
-  const demoOn = () => !$('demo').hidden;
+  const demoOn = () => !$('demo').hidden && !S.device.sim; // the simulator sends its own circle
   const circleShown = () => (demoOn() ? S.fake : S.circle);
   function multiplier() {
     if (demoOn()) {
@@ -528,7 +528,7 @@
     $('darkNote').hidden = showTime;
     $('railFill').style.width = ((done / s.total) * 100).toFixed(1) + '%';
     $('elapsedTxt').textContent = mmss(done) + ' elapsed of ' + mmss(s.total);
-    $('endsTxt').textContent = 'ends ' + clock(new Date(Date.now() + (s.left * 1000) / (S.device.connected ? 1 : S.speed)));
+    $('endsTxt').textContent = 'ends ' + clock(new Date(Date.now() + (s.left * 1000) / (S.device.sim ? S.device.sim.rate() : S.device.connected ? 1 : S.speed)));
 
     if (brk) {
       $('statusLine').textContent = 'Stretch, get water, step away. ' + petName() + ' will chime when it\'s time.';
@@ -785,6 +785,7 @@
   const CAMERA_DRIFT_STATES = ['drifting', 'unfocused'];
   const CAMERA_LABELS = { absent: 'Away from desk', drowsy: 'Drowsy', looking_away: 'Looking away', slouching: 'Slouching' };
   let helper = null;
+  let helperWait = 5000; // retry delay; doubles (to a minute) while nothing answers, so a missing app isn't hammered
 
   function sendHelper(obj) {
     if (helper && helper.readyState === WebSocket.OPEN) helper.send(JSON.stringify(obj));
@@ -802,10 +803,11 @@
   }
 
   function connectHelper() {
+    if (S.device.sim || helper) return; // no local app behind the demo page
     let ws;
     try { ws = new WebSocket('ws://localhost:8765'); } catch (e) { return; }
     helper = ws;
-    ws.onopen = () => { if (S.session && S.session.mode === 'focus') setCamera(true); };
+    ws.onopen = () => { helperWait = 5000; if (S.session && S.session.mode === 'focus') setCamera(true); };
     ws.onmessage = (ev) => {
       let m; try { m = JSON.parse(ev.data); } catch (e) { return; }
       if (m.t === 'focus') { onCameraTick(m); return; }
@@ -815,7 +817,11 @@
       if (hit) startDrift('site', m.label || SITE_LABELS[hit] || hit.charAt(0).toUpperCase() + hit.slice(1).replace('.com', ''));
       else if (S.session && S.session.drift && S.session.drift.kind === 'site') endDrift();
     };
-    ws.onclose = () => { if (helper === ws) helper = null; setTimeout(connectHelper, 5000); };
+    ws.onclose = () => {
+      if (helper === ws) helper = null;
+      setTimeout(connectHelper, helperWait);
+      helperWait = Math.min(60000, helperWait * 2);
+    };
   }
 
   function onCameraTick(m) {
@@ -831,14 +837,44 @@
     }
   }
 
+  // ---------- Simulated device (demo.js: ?demo=1, or any host but localhost) ----------
+  // It takes the serial port's place: send() writes to it, and its lines reach onDevice as a real device's do.
+  function startSim() {
+    const sim = PomoDemo.create((line) => {
+      if (S.device.sim !== sim) return; // a real device took over
+      S.lastRx = Date.now();
+      let m;
+      try { m = JSON.parse(line); } catch (e) { return; }
+      onDevice(m);
+    });
+    S.device = { connected: true, port: null, writer: sim.writer, stop: null, sim };
+    S.lastRx = Date.now();
+    S.armed = false;
+    $('demoBanner').hidden = false;
+    $('demo').hidden = false; // the drawer's keys drive the simulator
+  }
+  // A real device connected: the simulator, and any session it was running, go away
+  function endSim(sim) {
+    sim.stop();
+    S.dev = null; S.paused = false; S.testTiming = false; S.sessionNo = 1; S.readyDismissed = false; S.peekUntil = 0;
+    S.session = null;
+    $('demoBanner').hidden = true;
+    $('demo').hidden = true; // an open drawer would swap in its fake friends
+    renderReady();
+    if (S.view === 'live' || S.view === 'card') show('setup');
+    if (PomoDemo.isLocal()) connectHelper(); // the local app's focus feed, which demo mode left off
+  }
+
   // ---------- Device (Web Serial, JSON lines) ----------
   async function connectDevice() {
     if (S.lost) { reconnectDevice(true); return; }
-    if (S.device.connected) return;
+    if (S.device.connected && !S.device.sim) return;
     if (!('serial' in navigator)) { toast('Web Serial needs Chrome or Edge on localhost.'); return; }
     try {
+      const sim = S.device.sim;
       const port = await navigator.serial.requestPort();
       await attachPort(port);
+      if (sim) endSim(sim);
       S.circle = []; // the real circle arrives from the device
       S.gone = [];
       renderSetup();
@@ -945,7 +981,7 @@
     $('readyNextBtn').focus();
   }
   function linkWatch() {
-    if (S.armed && S.dev && BUSY_PHASES.includes(S.dev.phase) && deviceSessionRunning() && Date.now() - S.lastRx > 6000) linkLost();
+    if (!S.device.sim && S.armed && S.dev && BUSY_PHASES.includes(S.dev.phase) && deviceSessionRunning() && Date.now() - S.lastRx > 6000) linkLost();
   }
   // USB only when a vendor id is present; on Windows a paired Bluetooth SPP device is a plain COM port with no ids
   function transportOf(info) {
@@ -1576,8 +1612,8 @@
   }
 
   function setDeviceChip() {
-    $('deviceLamp').className = 'lamp' + (S.device.connected ? ' on' : '');
-    $('deviceText').textContent = S.device.connected ? 'Device coupled · ' + portTransport(S.device.port) : S.lost ? 'Device lost · Reconnect' : 'Connect device';
+    $('deviceLamp').className = 'lamp' + (S.device.sim ? ' demo' : S.device.connected ? ' on' : '');
+    $('deviceText').textContent = S.device.sim ? 'Simulated · Connect device' : S.device.connected ? 'Device coupled · ' + portTransport(S.device.port) : S.lost ? 'Device lost · Reconnect' : 'Connect device';
     if (!S.device.connected) { S.lookSync = false; clearTimeout(S.lookWait); }
     renderSync();
     if (S.view === 'home') renderHome();
@@ -1629,6 +1665,10 @@
   function demo(action) {
     const s = S.session;
     if (linkDown()) { toast('The session is paused until the device is back.'); return; }
+    const sim = S.device.sim; // the simulator owns the clock and the circle
+    if (sim && action === 'fast') { toast('The simulator already runs a session in about a minute.'); return; }
+    if (sim && action === 'finish') { if (!sim.finish()) toast('Start a session first.'); return; }
+    if (sim && action === 'friend') { const f = sim.toggleFriend(); toast(f ? f.name + (f.focused ? ' is focused again' : ' is drifting') : 'Start a session first.'); return; }
     if (action === 'friend' && !demoOn()) { toast('Open the demo drawer (D) to use the fake friends.'); return; }
     if (S.device.connected && (action === 'fast' || action === 'finish')) { toast('The device owns the clock while it is coupled.'); return; }
     if (action === 'fast') { S.speed = S.speed === 1 ? 30 : 1; toast(S.speed === 1 ? 'Normal speed' : 'Speed ×30'); if (S.view === 'live') renderLive(); return; }
@@ -2056,6 +2096,7 @@ const HEART_SVG = '<svg viewBox="0 0 7 6" width="100%" height="100%" shape-rende
     $('homePlayBtn').addEventListener('click', openPlay);
     wirePlay();
     $('homeConnectBtn').addEventListener('click', connectDevice);
+    if (window.PomoDemo && PomoDemo.wanted()) startSim();
     setDeviceChip();
     renderSetup();
     show('home');
